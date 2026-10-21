@@ -1,3 +1,5 @@
+use std::collections::BTreeMap;
+
 use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -10,10 +12,21 @@ pub struct Deployment {
     pub image: String,
     pub hostname: String,
     pub port: u16,
+    pub env: BTreeMap<String, String>,
 }
 
 impl Deployment {
     pub fn validate(&self) -> Result<()> {
+        for (name, value) in &self.env {
+            ensure!(
+                !name.is_empty() && !name.contains(['=', '\0']),
+                "environment variable name must be nonempty and contain neither = nor NUL"
+            );
+            ensure!(
+                !value.contains('\0'),
+                "environment variable value must not contain NUL"
+            );
+        }
         ensure!(
             !self.deployment_id.is_nil(),
             "deployment ID must not be nil"

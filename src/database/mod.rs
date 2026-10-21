@@ -37,6 +37,7 @@ pub struct JobRecord {
     pub hostname: String,
     #[diesel(select_expression = jobs::port.assume_not_null())]
     pub port: i32,
+    pub env: Option<String>,
 }
 
 impl JobRecord {
@@ -60,6 +61,13 @@ impl JobRecord {
             image: self.image.clone(),
             hostname: self.hostname.clone(),
             port: self.port.try_into().context("invalid stored port")?,
+            env: self
+                .env
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()
+                .context("invalid stored environment")?
+                .unwrap_or_default(),
         })
     }
 }
@@ -118,6 +126,7 @@ impl Store {
                 jobs::application_id.eq(deployment.application_id.to_string()),
                 jobs::hostname.eq(&deployment.hostname),
                 jobs::port.eq(i32::from(deployment.port)),
+                jobs::env.eq(serde_json::to_string(&deployment.env)?),
                 jobs::state.eq(JobState::Pending.as_str()),
                 jobs::updated_at.eq(now),
                 jobs::created_at.eq(now),

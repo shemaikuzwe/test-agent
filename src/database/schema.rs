@@ -11,5 +11,6 @@ diesel::table! {
         application_id -> Text,
         port -> Nullable<Integer>,
         hostname -> Nullable<Text>,
+        env -> Nullable<Text>,
     }
 }

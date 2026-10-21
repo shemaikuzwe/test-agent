@@ -153,3 +153,11 @@ Pull Repository permission:
 ```sh
 sudo -u sl-runner docker --config /etc/sl-runner/docker login 10.43.251.159
 ```
+
+## Application environment variables
+
+Add repeated `--env KEY=VALUE` arguments to `submit`:
+
+```sh
+sl-runner submit ... --env NODE_ENV=production --env 'TOKEN=value=with$dollars' --env EMPTY=
+```

@@ -15,6 +15,10 @@ fn stack_spec(deployment: &Deployment) -> Value {
         "services": {
             "app": {
                 "image": deployment.image,
+                // Compose interprets dollars even in JSON input. Escape literal values.
+                "environment": deployment.env.iter().map(|(name, value)| {
+                    (name.clone(), value.replace('$', "$$"))
+                }).collect::<std::collections::BTreeMap<_, _>>(),
                 "labels": { DEPLOYMENT_LABEL: deployment.deployment_id.to_string() },
                 "networks": ["sl-proxy"],
                 "deploy": {

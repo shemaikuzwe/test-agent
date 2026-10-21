@@ -1,6 +1,6 @@
-use std::{path::Path, process::ExitCode};
+use std::{collections::BTreeMap, path::Path, process::ExitCode};
 
-use anyhow::Result;
+use anyhow::{Result, ensure};
 use clap::{Parser, Subcommand};
 use sl_runner::{database::Store, deployment, deployment::types::Deployment, worker};
 use tokio::{
@@ -30,6 +30,8 @@ enum Command {
         hostname: String,
         #[arg(long)]
         port: u16,
+        #[arg(long, value_name = "KEY=VALUE")]
+        env: Vec<String>,
     },
     Wait {
         #[arg(long)]
@@ -65,6 +67,7 @@ async fn run(cli: Cli) -> Result<()> {
             application_id,
             hostname,
             port,
+            env,
         } => {
             let mut conn = Store::open(state_dir).await?;
             deployment::submit(
@@ -75,6 +78,7 @@ async fn run(cli: Cli) -> Result<()> {
                     application_id,
                     hostname,
                     port,
+                    env: parse_env(env)?,
                 },
             )
             .await?;
@@ -99,4 +103,19 @@ async fn run(cli: Cli) -> Result<()> {
             worker::run(&mut conn, shutdown).await
         }
     }
+}
+
+fn parse_env(entries: Vec<String>) -> Result<BTreeMap<String, String>> {
+    let mut env = BTreeMap::new();
+    for entry in entries {
+        let (name, value) = entry
+            .split_once('=')
+            .ok_or_else(|| anyhow::anyhow!("environment variable must use KEY=VALUE"))?;
+        ensure!(
+            !env.contains_key(name),
+            "duplicate environment variable name"
+        );
+        env.insert(name.to_owned(), value.to_owned());
+    }
+    Ok(env)
 }
