@@ -4,8 +4,9 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::{Value, json};
 use tokio::{io::AsyncWriteExt, process::Command, time};
+use uuid::Uuid;
 
-use super::types::Deployment;
+use super::types::{Deployment, RunningDeployment};
 
 const DEPLOYMENT_LABEL: &str = "sl-runner.deployment-id";
 
@@ -66,26 +67,71 @@ pub(super) async fn deploy(deployment: &Deployment) -> Result<()> {
         let services: Vec<Value> =
             serde_json::from_slice(&output).context("parse service inspection")?;
         let service = services.first().context("Docker returned no service")?;
-        let output = docker(
-            &["service", "ps", "--quiet", "--no-trunc", &service_name],
-            None,
-        )
-        .await?;
-        let ids = std::str::from_utf8(&output).context("parse task IDs")?;
-        let ids: Vec<&str> = ids.split_whitespace().collect();
-        let tasks: Vec<Value> = if ids.is_empty() {
-            Vec::new()
-        } else {
-            let mut args = vec!["inspect", "--type", "task"];
-            args.extend(ids);
-            serde_json::from_slice(&docker(&args, None).await?).context("parse task inspection")?
-        };
+        let tasks = inspect_tasks(&service_name).await?;
         if converged(service, &tasks, deployment)? {
             return Ok(());
         }
         // The worker bounds the entire deployment, including Docker commands, to 300 seconds.
         time::sleep(Duration::from_secs(2)).await;
     }
+}
+
+async fn inspect_tasks(service_name: &str) -> Result<Vec<Value>> {
+    let output = docker(
+        &["service", "ps", "--quiet", "--no-trunc", service_name],
+        None,
+    )
+    .await?;
+    let ids = std::str::from_utf8(&output).context("parse task IDs")?;
+    let ids: Vec<&str> = ids.split_whitespace().collect();
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut args = vec!["inspect", "--type", "task"];
+    args.extend(ids);
+    serde_json::from_slice(&docker(&args, None).await?).context("parse task inspection")
+}
+
+pub async fn running(application_id: Uuid) -> Result<Vec<RunningDeployment>> {
+    let tasks = inspect_tasks(&format!("sl-{application_id}_app")).await?;
+    running_deployments(&tasks)
+}
+
+fn running_deployments(tasks: &[Value]) -> Result<Vec<RunningDeployment>> {
+    let mut deployments = Vec::new();
+    for task in tasks {
+        // Include tasks still running during start-first updates, even if scheduled to stop.
+        if task.pointer("/Status/State").and_then(Value::as_str) != Some("running") {
+            continue;
+        }
+        let container = task
+            .pointer("/Spec/ContainerSpec")
+            .context("task has no container specification")?;
+        let deployment = RunningDeployment {
+            deployment_id: container
+                .pointer("/Labels/sl-runner.deployment-id")
+                .and_then(Value::as_str)
+                .context("running task has no deployment ID")?
+                .parse()
+                .context("invalid running deployment ID")?,
+            image: container
+                .get("Image")
+                .and_then(Value::as_str)
+                .context("running task has no image")?
+                .to_owned(),
+        };
+        if !deployments.contains(&deployment) {
+            deployments.push(deployment);
+        }
+    }
+    Ok(deployments)
+}
+
+pub async fn remove(application_id: Uuid) -> Result<()> {
+    let stack = format!("sl-{application_id}");
+    docker(&["stack", "rm", &stack], None).await?;
+    tracing::info!(%application_id, "application stack removal requested");
+    Ok(())
 }
 
 async fn docker(args: &[&str], input: Option<&[u8]>) -> Result<Vec<u8>> {

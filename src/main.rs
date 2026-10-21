@@ -37,6 +37,18 @@ enum Command {
         #[arg(long)]
         deployment_id: Uuid,
     },
+    Status {
+        #[arg(long)]
+        deployment_id: Uuid,
+    },
+    Running {
+        #[arg(long)]
+        application_id: Uuid,
+    },
+    Remove {
+        #[arg(long)]
+        application_id: Uuid,
+    },
     Daemon,
 }
 
@@ -88,6 +100,22 @@ async fn run(cli: Cli) -> Result<()> {
             let mut conn = Store::open(state_dir).await?;
             deployment::wait(&mut conn, deployment_id).await
         }
+        Command::Status { deployment_id } => {
+            let mut conn = Store::open(state_dir).await?;
+            println!(
+                "{}",
+                serde_json::to_string(&deployment::status(&mut conn, deployment_id).await?)?
+            );
+            Ok(())
+        }
+        Command::Running { application_id } => {
+            println!(
+                "{}",
+                serde_json::to_string(&deployment::running(application_id).await?)?
+            );
+            Ok(())
+        }
+        Command::Remove { application_id } => deployment::remove(application_id).await,
         Command::Daemon => {
             let mut conn = Store::open(state_dir).await?;
             let (stop, shutdown) = watch::channel(false);

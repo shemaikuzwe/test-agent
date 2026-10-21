@@ -1,6 +1,8 @@
 mod swarm;
 pub mod types;
 
+pub use swarm::{remove, running};
+
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
@@ -66,4 +68,21 @@ pub async fn process_request(store: &mut Store, deployment: Deployment) -> Resul
         }
     }
     Ok(())
+}
+
+pub async fn status(store: &mut Store, id: Uuid) -> Result<types::DeploymentStatus> {
+    let job = store.get_job(id).await?;
+    job.job_state()?;
+    Ok(types::DeploymentStatus {
+        deployment_id: job.deployment_uuid()?,
+        application_id: job
+            .application_id
+            .parse()
+            .context("invalid stored application ID")?,
+        state: job.state,
+        image: job.image,
+        error: job.error,
+        created_at: job.created_at,
+        updated_at: job.updated_at,
+    })
 }

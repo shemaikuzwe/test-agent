@@ -97,3 +97,22 @@ impl JobState {
         })
     }
 }
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DeploymentStatus {
+    pub deployment_id: Uuid,
+    pub application_id: Uuid,
+    pub state: String,
+    pub image: String,
+    pub error: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RunningDeployment {
+    pub deployment_id: Uuid,
+    pub image: String,
+}
