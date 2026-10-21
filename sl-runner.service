@@ -1,0 +1,25 @@
+[Unit]
+Description=SL Runner deployment daemon
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=sl-runner
+Group=sl-runner
+ExecStart=/opt/sl-runner/sl-runner --config /etc/sl-runner/config.json daemon
+Restart=on-failure
+RestartSec=5s
+StateDirectory=sl-runner
+StateDirectoryMode=0700
+UMask=0077
+TimeoutStopSec=360s
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
