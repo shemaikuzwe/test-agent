@@ -34,6 +34,10 @@ pub struct JobRecord {
     pub updated_at: i64,
     pub created_at: i64,
     pub application_id: String,
+    #[diesel(select_expression = jobs::hostname.assume_not_null())]
+    pub hostname: String,
+    #[diesel(select_expression = jobs::port.assume_not_null())]
+    pub port: i32,
 }
 
 impl JobRecord {
@@ -60,6 +64,8 @@ impl JobRecord {
                 .parse()
                 .context("invalid stored application ID")?,
             image: self.image.clone(),
+            hostname: self.hostname.clone(),
+            port: self.port.try_into().context("invalid stored port")?,
         })
     }
 
@@ -126,6 +132,8 @@ impl Store {
                 jobs::node_id.eq(deployment.node_id.to_string()),
                 jobs::image.eq(&deployment.image),
                 jobs::application_id.eq(deployment.application_id.to_string()),
+                jobs::hostname.eq(&deployment.hostname),
+                jobs::port.eq(i32::from(deployment.port)),
                 jobs::state.eq(JobState::Pending.as_str()),
                 jobs::updated_at.eq(now),
                 jobs::created_at.eq(now),
@@ -214,4 +222,33 @@ fn now() -> Result<i64> {
         .duration_since(UNIX_EPOCH)?
         .as_secs()
         .try_into()?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn queue_preserves_routing_across_reopen_and_duplicate_submission() -> Result<()> {
+        let directory = tempfile::tempdir()?;
+        Store::migrate(directory.path()).await?;
+        let mut store = Store::open(directory.path()).await?;
+        let mut deployment = Deployment {
+            deployment_id: Uuid::new_v4(),
+            node_id: Uuid::new_v4(),
+            application_id: Uuid::new_v4(),
+            image: format!("registry.local/app@sha256:{}", "a".repeat(64)),
+            hostname: "sl.local".to_owned(),
+            port: 3000,
+        };
+        assert!(store.enqueue_job(&deployment).await?);
+        deployment.hostname = "different.local".to_owned();
+        assert!(!store.enqueue_job(&deployment).await?);
+        drop(store);
+        let mut store = Store::open(directory.path()).await?;
+        let saved = store.get_next_job().await?.unwrap().deployment()?;
+        assert_eq!(saved.hostname, "sl.local");
+        assert_eq!(saved.port, 3000);
+        Ok(())
+    }
 }

@@ -9,6 +9,8 @@ pub struct Deployment {
     pub node_id: Uuid,
     pub application_id: Uuid,
     pub image: String,
+    pub hostname: String,
+    pub port: u16,
 }
 
 impl Deployment {
@@ -25,6 +27,21 @@ impl Deployment {
             !self.application_id.is_nil(),
             "application ID must not be nil"
         );
+        let hostname = &self.hostname;
+        ensure!(
+            hostname.len() <= 253
+                && hostname.split('.').all(|label| {
+                    !label.is_empty()
+                        && label.len() <= 63
+                        && !label.starts_with('-')
+                        && !label.ends_with('-')
+                        && label
+                            .bytes()
+                            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+                }),
+            "hostname must be a DNS name without a scheme, port, or path"
+        );
+        ensure!(self.port != 0, "port must be between 1 and 65535");
         let (name, digest) = self
             .image
             .rsplit_once("@sha256:")

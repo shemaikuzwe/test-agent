@@ -10,5 +10,7 @@ diesel::table! {
         created_at -> BigInt,
         image -> Text,
         application_id -> Text,
+        port -> Nullable<Integer>,
+        hostname -> Nullable<Text>,
     }
 }

@@ -1,0 +1,34 @@
+version: "3.8"
+
+services:
+  caddy:
+    image: lucaslorentz/caddy-docker-proxy:2.13.1-alpine
+    ports:
+      - target: 80
+        published: 80
+        protocol: tcp
+        mode: ingress
+    environment:
+      CADDY_INGRESS_NETWORKS: sl-proxy
+      CADDY_DOCKER_PROXY_SERVICE_TASKS: "false"
+    networks:
+      - sl-proxy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - caddy_data:/data
+    deploy:
+      replicas: 1
+      labels:
+        caddy.auto_https: "off"
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: any
+
+networks:
+  sl-proxy:
+    external: true
+
+volumes:
+  caddy_data: {}
