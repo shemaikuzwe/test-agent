@@ -6,7 +6,6 @@ use uuid::Uuid;
 #[serde(rename_all = "camelCase")]
 pub struct Deployment {
     pub deployment_id: Uuid,
-    pub node_id: Uuid,
     pub application_id: Uuid,
     pub image: String,
     pub hostname: String,
@@ -14,14 +13,10 @@ pub struct Deployment {
 }
 
 impl Deployment {
-    pub fn validate(&self, node_id: Uuid) -> Result<()> {
+    pub fn validate(&self) -> Result<()> {
         ensure!(
             !self.deployment_id.is_nil(),
             "deployment ID must not be nil"
-        );
-        ensure!(
-            self.node_id == node_id,
-            "deployment belongs to another node"
         );
         ensure!(
             !self.application_id.is_nil(),
@@ -88,43 +83,4 @@ impl JobState {
             _ => anyhow::bail!("unknown stored job state"),
         })
     }
-
-    pub fn wire(self) -> RunnerState {
-        match self {
-            Self::Pending | Self::Running => RunnerState::Received,
-            Self::Prepared => RunnerState::Prepared,
-            Self::Deployed => RunnerState::Deployed,
-            Self::Failed => RunnerState::Failed,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum RunnerState {
-    Received,
-    Prepared,
-    Deployed,
-    Failed,
-}
-
-impl RunnerState {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Received => "received",
-            Self::Prepared => "prepared",
-            Self::Deployed => "deployed",
-            Self::Failed => "failed",
-        }
-    }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct StatusUpdate {
-    pub node_id: Uuid,
-    pub state: RunnerState,
-    pub updated_at: i64,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<String>,
 }

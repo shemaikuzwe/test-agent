@@ -1,9 +1,0 @@
-{
-  "api_url": "https://hosting.example.com/",
-  "node_id": "00000000-0000-4000-8000-000000000001",
-  "client_cert": "/etc/sl-runner/certs/client.crt",
-  "client_key": "/etc/sl-runner/certs/client.key",
-  "server_ca": "/etc/sl-runner/certs/ca.crt",
-  "state_dir": "/var/lib/sl-runner"
-}
-

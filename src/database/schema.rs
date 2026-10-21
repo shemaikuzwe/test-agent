@@ -3,7 +3,6 @@
 diesel::table! {
     jobs (deployment_id) {
         deployment_id -> Text,
-        node_id -> Text,
         state -> Text,
         error -> Nullable<Text>,
         updated_at -> BigInt,

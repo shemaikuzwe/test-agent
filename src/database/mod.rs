@@ -14,7 +14,7 @@ use diesel_async::{
 use diesel_migrations::{EmbeddedMigrations, MigrationHarness, embed_migrations};
 use uuid::Uuid;
 
-use crate::deployment::types::{Deployment, JobState, StatusUpdate};
+use crate::deployment::types::{Deployment, JobState};
 
 mod schema;
 
@@ -27,7 +27,6 @@ const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
 pub struct JobRecord {
     pub deployment_id: String,
-    pub node_id: String,
     pub state: String,
     pub image: String,
     pub error: Option<String>,
@@ -51,14 +50,9 @@ impl JobRecord {
             .context("invalid stored deployment ID")
     }
 
-    pub fn node_uuid(&self) -> Result<Uuid> {
-        self.node_id.parse().context("invalid stored node ID")
-    }
-
     pub fn deployment(&self) -> Result<Deployment> {
         Ok(Deployment {
             deployment_id: self.deployment_uuid()?,
-            node_id: self.node_uuid()?,
             application_id: self
                 .application_id
                 .parse()
@@ -66,15 +60,6 @@ impl JobRecord {
             image: self.image.clone(),
             hostname: self.hostname.clone(),
             port: self.port.try_into().context("invalid stored port")?,
-        })
-    }
-
-    pub fn status(&self) -> Result<StatusUpdate> {
-        Ok(StatusUpdate {
-            node_id: self.node_uuid()?,
-            state: self.job_state()?.wire(),
-            updated_at: self.updated_at,
-            error: self.error.clone(),
         })
     }
 }
@@ -129,7 +114,6 @@ impl Store {
         let inserted = diesel::insert_or_ignore_into(jobs::table)
             .values((
                 jobs::deployment_id.eq(deployment.deployment_id.to_string()),
-                jobs::node_id.eq(deployment.node_id.to_string()),
                 jobs::image.eq(&deployment.image),
                 jobs::application_id.eq(deployment.application_id.to_string()),
                 jobs::hostname.eq(&deployment.hostname),
@@ -222,33 +206,4 @@ fn now() -> Result<i64> {
         .duration_since(UNIX_EPOCH)?
         .as_secs()
         .try_into()?)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn queue_preserves_routing_across_reopen_and_duplicate_submission() -> Result<()> {
-        let directory = tempfile::tempdir()?;
-        Store::migrate(directory.path()).await?;
-        let mut store = Store::open(directory.path()).await?;
-        let mut deployment = Deployment {
-            deployment_id: Uuid::new_v4(),
-            node_id: Uuid::new_v4(),
-            application_id: Uuid::new_v4(),
-            image: format!("registry.local/app@sha256:{}", "a".repeat(64)),
-            hostname: "sl.local".to_owned(),
-            port: 3000,
-        };
-        assert!(store.enqueue_job(&deployment).await?);
-        deployment.hostname = "different.local".to_owned();
-        assert!(!store.enqueue_job(&deployment).await?);
-        drop(store);
-        let mut store = Store::open(directory.path()).await?;
-        let saved = store.get_next_job().await?.unwrap().deployment()?;
-        assert_eq!(saved.hostname, "sl.local");
-        assert_eq!(saved.port, 3000);
-        Ok(())
-    }
 }

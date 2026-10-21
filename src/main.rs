@@ -1,10 +1,8 @@
-use std::{path::PathBuf, process::ExitCode};
+use std::{path::Path, process::ExitCode};
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use sl_runner::{
-    api::Api, config::Config, database::Store, deployment, deployment::types::Deployment, worker,
-};
+use sl_runner::{database::Store, deployment, deployment::types::Deployment, worker};
 use tokio::{
     signal::unix::{SignalKind, signal},
     sync::watch,
@@ -14,8 +12,6 @@ use uuid::Uuid;
 #[derive(Parser)]
 #[command(version, about = "Scriptylabs hosting deployment runner")]
 struct Cli {
-    #[arg(long, global = true, default_value = "config.json")]
-    config: PathBuf,
     #[command(subcommand)]
     command: Command,
 }
@@ -27,8 +23,6 @@ enum Command {
         #[arg(long)]
         deployment_id: Uuid,
         #[arg(long)]
-        node_id: Uuid,
-        #[arg(long)]
         image: String,
         #[arg(long)]
         application_id: Uuid,
@@ -36,6 +30,10 @@ enum Command {
         hostname: String,
         #[arg(long)]
         port: u16,
+    },
+    Wait {
+        #[arg(long)]
+        deployment_id: Uuid,
     },
     Daemon,
 }
@@ -58,36 +56,36 @@ async fn main() -> ExitCode {
 }
 
 async fn run(cli: Cli) -> Result<()> {
-    let config = Config::load(&cli.config).await?;
+    let state_dir = Path::new("/var/lib/sl-runner");
     match cli.command {
-        Command::Migrate => Store::migrate(&config.state_dir).await,
+        Command::Migrate => Store::migrate(state_dir).await,
         Command::Submit {
             deployment_id,
-            node_id,
             image,
             application_id,
             hostname,
             port,
         } => {
-            let mut conn = Store::open(&config.state_dir).await?;
+            let mut conn = Store::open(state_dir).await?;
             deployment::submit(
                 &mut conn,
                 Deployment {
                     deployment_id,
-                    node_id,
                     image,
                     application_id,
                     hostname,
                     port,
                 },
-                config.node_id,
             )
             .await?;
             Ok(())
         }
+        Command::Wait { deployment_id } => {
+            let mut conn = Store::open(state_dir).await?;
+            deployment::wait(&mut conn, deployment_id).await
+        }
         Command::Daemon => {
-            let api = Api::new(&config).await?;
-            let mut conn = Store::open(&config.state_dir).await?;
+            let mut conn = Store::open(state_dir).await?;
             let (stop, shutdown) = watch::channel(false);
             let mut sigterm = signal(SignalKind::terminate())?;
             let mut sigint = signal(SignalKind::interrupt())?;
@@ -98,7 +96,7 @@ async fn run(cli: Cli) -> Result<()> {
                 }
                 let _ = stop.send(true);
             });
-            worker::run(&api, &mut conn, shutdown).await
+            worker::run(&mut conn, shutdown).await
         }
     }
 }

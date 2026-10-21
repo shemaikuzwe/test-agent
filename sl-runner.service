@@ -10,7 +10,7 @@ User=sl-runner
 Group=sl-runner
 SupplementaryGroups=docker
 Environment=DOCKER_CONFIG=/etc/sl-runner/docker
-ExecStart=/opt/sl-runner/sl-runner --config /etc/sl-runner/config.json daemon
+ExecStart=/opt/sl-runner/sl-runner daemon
 Restart=on-failure
 RestartSec=5s
 StateDirectory=sl-runner
