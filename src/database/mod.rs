@@ -33,6 +33,7 @@ pub struct JobRecord {
     pub error: Option<String>,
     pub updated_at: i64,
     pub created_at: i64,
+    pub application_id: String,
 }
 
 impl JobRecord {
@@ -48,6 +49,18 @@ impl JobRecord {
 
     pub fn node_uuid(&self) -> Result<Uuid> {
         self.node_id.parse().context("invalid stored node ID")
+    }
+
+    pub fn deployment(&self) -> Result<Deployment> {
+        Ok(Deployment {
+            deployment_id: self.deployment_uuid()?,
+            node_id: self.node_uuid()?,
+            application_id: self
+                .application_id
+                .parse()
+                .context("invalid stored application ID")?,
+            image: self.image.clone(),
+        })
     }
 
     pub fn status(&self) -> Result<StatusUpdate> {
@@ -112,6 +125,7 @@ impl Store {
                 jobs::deployment_id.eq(deployment.deployment_id.to_string()),
                 jobs::node_id.eq(deployment.node_id.to_string()),
                 jobs::image.eq(&deployment.image),
+                jobs::application_id.eq(deployment.application_id.to_string()),
                 jobs::state.eq(JobState::Pending.as_str()),
                 jobs::updated_at.eq(now),
                 jobs::created_at.eq(now),
@@ -177,7 +191,10 @@ impl Store {
         error: Option<&str>,
     ) -> Result<()> {
         ensure!(
-            matches!(state, JobState::Prepared | JobState::Failed),
+            matches!(
+                state,
+                JobState::Prepared | JobState::Deployed | JobState::Failed
+            ),
             "completion requires a terminal job state"
         );
         diesel::update(jobs::table.find(id.to_string()))

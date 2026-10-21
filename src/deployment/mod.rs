@@ -1,3 +1,4 @@
+mod swarm;
 pub mod types;
 
 use anyhow::Result;
@@ -27,11 +28,15 @@ pub async fn process_request(api: &Api, store: &mut Store, deployment: Deploymen
     tracing::info!(deployment_id = %id, "processing deployment");
     update_status(api, store, id).await?;
 
-    match deployment.validate(deployment.node_id) {
+    let result = async {
+        deployment.validate(deployment.node_id)?;
+        swarm::deploy(&deployment).await
+    }
+    .await;
+    match result {
         Ok(()) => {
-            //TODO: Container execution will be added in a later milestone.
-            store.complete_job(id, JobState::Prepared, None).await?;
-            tracing::info!(deployment_id = %id, "deployment prepared");
+            store.complete_job(id, JobState::Deployed, None).await?;
+            tracing::info!(deployment_id = %id, "deployment deployed");
         }
         Err(error) => {
             store
@@ -43,7 +48,7 @@ pub async fn process_request(api: &Api, store: &mut Store, deployment: Deploymen
     update_status(api, store, id).await
 }
 
-async fn update_status(api: &Api, store: &mut Store, id: Uuid) -> Result<()> {
+pub(crate) async fn update_status(api: &Api, store: &mut Store, id: Uuid) -> Result<()> {
     let status = store.get_job(id).await?.status()?;
     if let Err(error) = api.update_status(id, &status).await {
         tracing::warn!(deployment_id = %id, error = %error, "status delivery failed");

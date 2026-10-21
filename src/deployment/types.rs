@@ -7,6 +7,7 @@ use uuid::Uuid;
 pub struct Deployment {
     pub deployment_id: Uuid,
     pub node_id: Uuid,
+    pub application_id: Uuid,
     pub image: String,
 }
 
@@ -20,13 +21,17 @@ impl Deployment {
             self.node_id == node_id,
             "deployment belongs to another node"
         );
+        ensure!(
+            !self.application_id.is_nil(),
+            "application ID must not be nil"
+        );
         let (name, digest) = self
             .image
             .rsplit_once("@sha256:")
             .ok_or_else(|| anyhow::anyhow!("image must be pinned to a sha256 digest"))?;
         ensure!(
             !name.is_empty()
-                && !name.contains('@')
+                && !name.contains(['@', '$'])
                 && !name.chars().any(char::is_whitespace)
                 && digest.len() == 64
                 && digest.bytes().all(|byte| byte.is_ascii_hexdigit()),
@@ -41,6 +46,7 @@ pub enum JobState {
     Pending,
     Running,
     Prepared,
+    Deployed,
     Failed,
 }
 
@@ -50,6 +56,7 @@ impl JobState {
             Self::Pending => "pending",
             Self::Running => "running",
             Self::Prepared => "prepared",
+            Self::Deployed => "deployed",
             Self::Failed => "failed",
         }
     }
@@ -59,6 +66,7 @@ impl JobState {
             "pending" => Self::Pending,
             "running" => Self::Running,
             "prepared" => Self::Prepared,
+            "deployed" => Self::Deployed,
             "failed" => Self::Failed,
             _ => anyhow::bail!("unknown stored job state"),
         })
@@ -68,6 +76,7 @@ impl JobState {
         match self {
             Self::Pending | Self::Running => RunnerState::Received,
             Self::Prepared => RunnerState::Prepared,
+            Self::Deployed => RunnerState::Deployed,
             Self::Failed => RunnerState::Failed,
         }
     }
@@ -78,6 +87,7 @@ impl JobState {
 pub enum RunnerState {
     Received,
     Prepared,
+    Deployed,
     Failed,
 }
 
@@ -86,6 +96,7 @@ impl RunnerState {
         match self {
             Self::Received => "received",
             Self::Prepared => "prepared",
+            Self::Deployed => "deployed",
             Self::Failed => "failed",
         }
     }

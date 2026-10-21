@@ -30,6 +30,8 @@ enum Command {
         node_id: Uuid,
         #[arg(long)]
         image: String,
+        #[arg(long)]
+        application_id: Uuid,
     },
     Daemon,
 }
@@ -59,6 +61,7 @@ async fn run(cli: Cli) -> Result<()> {
             deployment_id,
             node_id,
             image,
+            application_id,
         } => {
             let mut conn = Store::open(&config.state_dir).await?;
             deployment::submit(
@@ -67,6 +70,7 @@ async fn run(cli: Cli) -> Result<()> {
                     deployment_id,
                     node_id,
                     image,
+                    application_id,
                 },
                 config.node_id,
             )

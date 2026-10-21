@@ -3,7 +3,7 @@ use std::time::Duration;
 use anyhow::Result;
 use tokio::{sync::watch, time};
 
-use crate::{api::Api, database::Store, deployment, deployment::types::Deployment};
+use crate::{api::Api, database::Store, deployment};
 
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
 const JOB_TIMEOUT: Duration = Duration::from_secs(300);
@@ -34,26 +34,25 @@ async fn drain(api: &Api, store: &mut Store, shutdown: &watch::Receiver<bool>) -
         };
         worked = true;
         let id = job.deployment_uuid()?;
-        let deployment = Deployment {
-            deployment_id: id,
-            node_id: job.node_uuid()?,
-            image: job.image,
-        };
-        if time::timeout(
+        let deployment = job.deployment()?;
+        match time::timeout(
             JOB_TIMEOUT,
             deployment::process_request(api, store, deployment),
         )
         .await
-        .is_err()
         {
-            tracing::warn!(deployment_id = %id, "deployment timed out");
-            store
-                .complete_job(
-                    id,
-                    deployment::types::JobState::Failed,
-                    Some("deployment timed out"),
-                )
-                .await?;
+            Ok(result) => result?,
+            Err(_) => {
+                tracing::warn!(deployment_id = %id, "deployment timed out");
+                store
+                    .complete_job(
+                        id,
+                        deployment::types::JobState::Failed,
+                        Some("deployment timed out"),
+                    )
+                    .await?;
+                deployment::update_status(api, store, id).await?;
+            }
         }
     }
     Ok(worked)

@@ -9,5 +9,6 @@ diesel::table! {
         updated_at -> BigInt,
         created_at -> BigInt,
         image -> Text,
+        application_id -> Text,
     }
 }

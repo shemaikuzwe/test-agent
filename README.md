@@ -42,6 +42,7 @@ cargo run -- migrate
 ./target/release/sl-runner --config /absolute/path/config.json submit \
   --deployment-id 00000000-0000-4000-8000-000000000002 \
   --node-id 00000000-0000-4000-8000-000000000001 \
+  --application-id 00000000-0000-4000-8000-000000000003 \
   --image registry.example.com/project/app@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 ./target/release/sl-runner --config /absolute/path/config.json daemon
 ```
@@ -67,7 +68,7 @@ from the hosting API. Duplicate deployment IDs keep their original queued payloa
 ```json
 {
   "nodeId": "00000000-0000-4000-8000-000000000001",
-  "state": "prepared",
+  "state": "deployed",
   "updatedAt": 1792576800
 }
 ```
@@ -102,6 +103,7 @@ From an Incus client with access to the VM, enqueue a deployment:
 incus exec <vm-name> -- sudo -u sl-runner /opt/sl-runner/sl-runner --config /etc/sl-runner/config.json submit \
   --deployment-id 00000000-0000-4000-8000-000000000002 \
   --node-id 00000000-0000-4000-8000-000000000001 \
+  --application-id 00000000-0000-4000-8000-000000000003 \
   --image registry.example.com/project/app@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 ```
 
@@ -121,4 +123,13 @@ sudo systemctl stop sl-runner.service
 sudo install -m 0755 target/release/sl-runner /opt/sl-runner/sl-runner
 sudo -u sl-runner /opt/sl-runner/sl-runner --config /etc/sl-runner/config.json migrate
 sudo systemctl start sl-runner.service
+```
+
+## Swarm execution
+
+Install Docker Engine and its CLI in the project-owned VM before starting the
+runner. Initialize an independent single-node Swarm during node provisioning:
+
+```sh
+sudo docker swarm init --advertise-addr <vm-ip>
 ```
