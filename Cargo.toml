@@ -1,6 +1,6 @@
 [package]
 name = "sl-runner"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 rust-version = "1.89"
 publish = false
@@ -17,9 +17,6 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs", "signal"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["json"] }
 uuid = { version = "1", features = ["serde", "v4"] }
-
-[dev-dependencies]
-tempfile = "3"
 
 [profile.release]
 lto = "thin"
