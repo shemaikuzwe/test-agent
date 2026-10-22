@@ -73,6 +73,24 @@ Check whether the installed runner daemon is running (no root required):
 sl-runner health
 ```
 
+Remove the runner service and binary:
+
+```sh
+sudo sl-runner uninstall
+```
+
+The database, registry credentials, and runner account are preserved for
+reinstallation. To also permanently delete those:
+
+```sh
+sudo sl-runner uninstall --purge
+```
+
+Both commands stop and disable the daemon, remove its systemd unit and installed
+binary, and remove the CLI symlink if it points to that binary. Docker, Swarm,
+Caddy, and deployed applications remain running. Purging deletes
+`/var/lib/sl-runner`, `/etc/sl-runner`, and the `sl-runner` user and group.
+
 ## Swarm execution
 
 Install Docker Engine and its CLI in the project-owned VM before starting the

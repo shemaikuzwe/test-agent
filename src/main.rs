@@ -24,6 +24,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Remove the runner service and binary.
+    Uninstall {
+        /// Also delete saved state, registry credentials, and the runner account.
+        #[arg(long)]
+        purge: bool,
+    },
     /// Check whether the installed runner service is active.
     Health,
     Upgrade {
@@ -37,7 +43,7 @@ enum Command {
         #[arg(long)]
         image: String,
         #[arg(long)]
-        application_id: Uuid,
+        application_id: String,
         #[arg(long)]
         hostname: String,
         #[arg(long)]
@@ -55,10 +61,10 @@ enum Command {
         deployment_id: Uuid,
     },
     Running {
-        application_id: Uuid,
+        application_id: String,
     },
     Remove {
-        application_id: Uuid,
+        application_id: String,
     },
     Daemon,
 }
@@ -67,6 +73,7 @@ impl Command {
     fn context(&self) -> (CommandName, ErrorData) {
         let mut data = ErrorData::default();
         let name = match self {
+            Self::Uninstall { .. } => CommandName::Uninstall,
             Self::Health => CommandName::Health,
             Self::Upgrade { .. } => CommandName::Upgrade,
             Self::Migrate => CommandName::Migrate,
@@ -76,7 +83,7 @@ impl Command {
                 ..
             } => {
                 data.deployment_id = Some(*deployment_id);
-                data.application_id = Some(*application_id);
+                data.application_id = Some(application_id.clone());
                 CommandName::Submit
             }
             Self::Rollback { deployment_id } => {
@@ -92,11 +99,11 @@ impl Command {
                 CommandName::Status
             }
             Self::Running { application_id } => {
-                data.application_id = Some(*application_id);
+                data.application_id = Some(application_id.clone());
                 CommandName::Running
             }
             Self::Remove { application_id } => {
-                data.application_id = Some(*application_id);
+                data.application_id = Some(application_id.clone());
                 CommandName::Remove
             }
             Self::Daemon => CommandName::Daemon,
@@ -166,6 +173,21 @@ async fn main() -> ExitCode {
 
 async fn run(cli: Cli, state_dir: &Path) -> Result<CommandData> {
     match cli.command {
+        Command::Uninstall { purge } => {
+            let status = tokio::process::Command::new("bash")
+                .arg("-c")
+                .arg(include_str!("../scripts/uninstall.sh"))
+                .arg("sl-runner uninstall")
+                .arg(if purge { "--purge" } else { "" })
+                .stdout(std::process::Stdio::from(std::io::stderr()))
+                .status()
+                .await?;
+            ensure!(status.success(), "uninstall failed; see stderr for details");
+            Ok(CommandData::Uninstall {
+                message: "runner uninstalled",
+                purged: purge,
+            })
+        }
         Command::Health => {
             let output = tokio::process::Command::new("systemctl")
                 .args(["is-active", "sl-runner.service"])
@@ -281,14 +303,14 @@ async fn run(cli: Cli, state_dir: &Path) -> Result<CommandData> {
             ))
         }
         Command::Running { application_id } => {
-            let deployments = deployment::running(application_id).await?;
+            let deployments = deployment::running(&application_id).await?;
             Ok(CommandData::Running {
                 application_id,
                 deployments,
             })
         }
         Command::Remove { application_id } => {
-            deployment::remove(application_id)
+            deployment::remove(&application_id)
                 .await
                 .context(ErrorCode::DockerError)?;
             Ok(CommandData::Remove {

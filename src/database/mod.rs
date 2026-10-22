@@ -58,10 +58,7 @@ impl TryFrom<JobRecord> for Job {
                     .deployment_id
                     .parse()
                     .context("invalid stored deployment ID")?,
-                application_id: record
-                    .application_id
-                    .parse()
-                    .context("invalid stored application ID")?,
+                application_id: record.application_id,
                 image: record.image,
                 hostname: record.hostname,
                 port: record.port.try_into().context("invalid stored port")?,

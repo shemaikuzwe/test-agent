@@ -13,6 +13,7 @@ use crate::deployment::types::{DeploymentStatus, JobState, RunningDeployment};
 #[derive(Clone, Copy, Debug, Serialize, ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum CommandName {
+    Uninstall,
     Health,
     Upgrade,
     Migrate,
@@ -120,6 +121,10 @@ impl<T: Serialize> Response<T> {
 #[derive(Debug, Serialize)]
 #[serde(untagged, rename_all_fields = "camelCase")]
 pub enum CommandData {
+    Uninstall {
+        message: &'static str,
+        purged: bool,
+    },
     Health {
         service: &'static str,
         running: bool,
@@ -148,12 +153,12 @@ pub enum CommandData {
     },
     Status(DeploymentStatus),
     Running {
-        application_id: Uuid,
+        application_id: String,
         deployments: Vec<RunningDeployment>,
     },
     Remove {
         message: &'static str,
-        application_id: Uuid,
+        application_id: String,
         removal_requested: bool,
     },
     Daemon {
@@ -162,13 +167,13 @@ pub enum CommandData {
     },
 }
 
-#[derive(Clone, Copy, Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ErrorData {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deployment_id: Option<Uuid>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub application_id: Option<Uuid>,
+    pub application_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub state: Option<JobState>,
     #[serde(skip_serializing_if = "Option::is_none")]

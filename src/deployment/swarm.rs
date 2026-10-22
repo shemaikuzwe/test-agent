@@ -4,11 +4,10 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail, ensure};
 use serde_json::{Value, json};
 use tokio::{io::AsyncWriteExt, process::Command, time};
-use uuid::Uuid;
 
 use crate::response::ErrorCode;
 
-use super::types::{Deployment, RunningDeployment};
+use super::types::{Deployment, RunningDeployment, validate_application_id};
 
 const DEPLOYMENT_LABEL: &str = "sl-runner.deployment-id";
 
@@ -101,7 +100,8 @@ async fn inspect_tasks(service_name: &str) -> Result<Vec<Value>> {
     serde_json::from_slice(&docker(&args, None).await?).context("parse task inspection")
 }
 
-pub async fn running(application_id: Uuid) -> Result<Vec<RunningDeployment>> {
+pub async fn running(application_id: &str) -> Result<Vec<RunningDeployment>> {
+    validate_application_id(application_id).context(ErrorCode::InvalidArgument)?;
     let service = format!("sl-{application_id}_app");
     // Listing gives a structured absence result; Docker CLI failure text is not a contract.
     let output = docker(
@@ -158,7 +158,8 @@ fn running_deployments(tasks: &[Value]) -> Result<Vec<RunningDeployment>> {
     Ok(deployments)
 }
 
-pub async fn remove(application_id: Uuid) -> Result<()> {
+pub async fn remove(application_id: &str) -> Result<()> {
+    validate_application_id(application_id).context(ErrorCode::InvalidArgument)?;
     let stack = format!("sl-{application_id}");
     docker(&["stack", "rm", &stack], None).await?;
     tracing::info!(%application_id, "application stack removal requested");
