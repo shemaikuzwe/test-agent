@@ -33,6 +33,11 @@ enum Command {
         #[arg(long, value_name = "KEY=VALUE")]
         env: Vec<String>,
     },
+    /// Restore a successful deployment's saved configuration as a new deployment.
+    Rollback {
+        #[arg(long)]
+        deployment_id: Uuid,
+    },
     Wait {
         #[arg(long)]
         deployment_id: Uuid,
@@ -94,6 +99,12 @@ async fn run(cli: Cli) -> Result<()> {
                 },
             )
             .await?;
+            Ok(())
+        }
+        Command::Rollback { deployment_id } => {
+            let mut conn = Store::open(state_dir).await?;
+            let id = deployment::rollback(&mut conn, deployment_id).await?;
+            println!("{}", serde_json::json!({ "deploymentId": id }));
             Ok(())
         }
         Command::Wait { deployment_id } => {

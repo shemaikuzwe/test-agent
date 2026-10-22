@@ -20,7 +20,14 @@ fn stack_spec(deployment: &Deployment) -> Value {
                 "environment": deployment.env.iter().map(|(name, value)| {
                     (name.clone(), value.replace('$', "$$"))
                 }).collect::<std::collections::BTreeMap<_, _>>(),
-                "labels": { DEPLOYMENT_LABEL: deployment.deployment_id.to_string() },
+                "labels": {
+                    DEPLOYMENT_LABEL: deployment.deployment_id.to_string(),
+                    "sl-runner.application-id": deployment.application_id.to_string()
+                },
+                "logging": {
+                    "driver": "json-file",
+                    "options": { "max-size": "10m", "max-file": "3" }
+                },
                 "networks": ["sl-proxy"],
                 "deploy": {
                     "replicas": 1,
@@ -42,7 +49,7 @@ fn stack_spec(deployment: &Deployment) -> Value {
     })
 }
 
-pub(super) async fn deploy(deployment: &Deployment) -> Result<()> {
+pub(crate) async fn deploy(deployment: &Deployment) -> Result<()> {
     let stack = format!("sl-{}", deployment.application_id);
     let service_name = format!("{stack}_app");
     let spec = serde_json::to_vec(&stack_spec(deployment))?;

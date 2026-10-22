@@ -25,49 +25,58 @@ const MIGRATIONS: EmbeddedMigrations = embed_migrations!("migrations");
 #[derive(Debug, Queryable, Selectable)]
 #[diesel(table_name = jobs)]
 #[diesel(check_for_backend(diesel::sqlite::Sqlite))]
-pub struct JobRecord {
-    pub deployment_id: String,
-    pub state: String,
-    pub image: String,
-    pub error: Option<String>,
-    pub updated_at: i64,
-    pub created_at: i64,
-    pub application_id: String,
+struct JobRecord {
+    deployment_id: String,
+    state: String,
+    image: String,
+    error: Option<String>,
+    updated_at: i64,
+    created_at: i64,
+    application_id: String,
     #[diesel(select_expression = jobs::hostname.assume_not_null())]
-    pub hostname: String,
+    hostname: String,
     #[diesel(select_expression = jobs::port.assume_not_null())]
-    pub port: i32,
-    pub env: Option<String>,
+    port: i32,
+    env: Option<String>,
 }
 
-impl JobRecord {
-    pub fn job_state(&self) -> Result<JobState> {
-        JobState::parse(&self.state)
-    }
+pub struct Job {
+    pub deployment: Deployment,
+    pub state: JobState,
+    pub error: Option<String>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
 
-    pub fn deployment_uuid(&self) -> Result<Uuid> {
-        self.deployment_id
-            .parse()
-            .context("invalid stored deployment ID")
-    }
+impl TryFrom<JobRecord> for Job {
+    type Error = anyhow::Error;
 
-    pub fn deployment(&self) -> Result<Deployment> {
-        Ok(Deployment {
-            deployment_id: self.deployment_uuid()?,
-            application_id: self
-                .application_id
-                .parse()
-                .context("invalid stored application ID")?,
-            image: self.image.clone(),
-            hostname: self.hostname.clone(),
-            port: self.port.try_into().context("invalid stored port")?,
-            env: self
-                .env
-                .as_deref()
-                .map(serde_json::from_str)
-                .transpose()
-                .context("invalid stored environment")?
-                .unwrap_or_default(),
+    fn try_from(record: JobRecord) -> Result<Self> {
+        Ok(Self {
+            deployment: Deployment {
+                deployment_id: record
+                    .deployment_id
+                    .parse()
+                    .context("invalid stored deployment ID")?,
+                application_id: record
+                    .application_id
+                    .parse()
+                    .context("invalid stored application ID")?,
+                image: record.image,
+                hostname: record.hostname,
+                port: record.port.try_into().context("invalid stored port")?,
+                env: record
+                    .env
+                    .as_deref()
+                    .map(serde_json::from_str)
+                    .transpose()
+                    .context("invalid stored environment")?
+                    .unwrap_or_default(),
+            },
+            state: JobState::parse(&record.state)?,
+            error: record.error,
+            created_at: record.created_at,
+            updated_at: record.updated_at,
         })
     }
 }
@@ -136,7 +145,7 @@ impl Store {
         Ok(inserted == 1)
     }
 
-    pub async fn get_next_job(&mut self) -> Result<Option<JobRecord>> {
+    pub async fn claim_next_job(&mut self) -> Result<Option<Job>> {
         let next = jobs::table
             .filter(jobs::state.eq(JobState::Pending.as_str()))
             .order((jobs::created_at.asc(), jobs::deployment_id.asc()))
@@ -161,7 +170,13 @@ impl Store {
         if claimed == 0 {
             return Ok(None);
         }
-        self.get_job(job.deployment_uuid()?).await.map(Some)
+        self.get_job(
+            job.deployment_id
+                .parse()
+                .context("invalid stored deployment ID")?,
+        )
+        .await
+        .map(Some)
     }
 
     pub async fn requeue_interrupted_job(&mut self) -> Result<usize> {
@@ -176,13 +191,14 @@ impl Store {
         )
     }
 
-    pub async fn get_job(&mut self, id: Uuid) -> Result<JobRecord> {
+    pub async fn get_job(&mut self, id: Uuid) -> Result<Job> {
         jobs::table
             .find(id.to_string())
             .select(JobRecord::as_select())
             .first(&mut self.connection)
             .await
-            .context("read deployment state")
+            .context("read deployment state")?
+            .try_into()
     }
 
     pub async fn complete_job(
@@ -192,10 +208,7 @@ impl Store {
         error: Option<&str>,
     ) -> Result<()> {
         ensure!(
-            matches!(
-                state,
-                JobState::Prepared | JobState::Deployed | JobState::Failed
-            ),
+            matches!(state, JobState::Deployed | JobState::Failed),
             "completion requires a terminal job state"
         );
         diesel::update(jobs::table.find(id.to_string()))

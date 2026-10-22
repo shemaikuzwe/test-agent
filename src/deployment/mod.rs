@@ -1,11 +1,12 @@
 mod swarm;
 pub mod types;
 
+pub(crate) use swarm::deploy;
 pub use swarm::{remove, running};
 
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use tokio::time;
 use uuid::Uuid;
 
@@ -24,13 +25,29 @@ pub async fn submit(store: &mut Store, deployment: Deployment) -> Result<bool> {
     Ok(queued)
 }
 
+pub async fn rollback(store: &mut Store, deployment_id: Uuid) -> Result<Uuid> {
+    let target = store
+        .get_job(deployment_id)
+        .await
+        .with_context(|| format!("read rollback deployment {deployment_id}"))?;
+    ensure!(
+        target.state == JobState::Deployed,
+        "rollback target must be a successful deployment"
+    );
+    let mut deployment = target.deployment;
+    let new_id = Uuid::new_v4();
+    deployment.deployment_id = new_id;
+    submit(store, deployment).await?;
+    Ok(new_id)
+}
+
 pub async fn wait(store: &mut Store, id: Uuid) -> Result<()> {
     loop {
         let job = store
             .get_job(id)
             .await
             .with_context(|| format!("read deployment {id} while waiting"))?;
-        match job.job_state()? {
+        match job.state {
             JobState::Deployed => {
                 tracing::info!(deployment_id = %id, "deployment deployed");
                 return Ok(());
@@ -39,48 +56,20 @@ pub async fn wait(store: &mut Store, id: Uuid) -> Result<()> {
                 "deployment {id} failed: {}",
                 job.error.as_deref().unwrap_or("no failure reason recorded")
             ),
-            JobState::Pending | JobState::Running | JobState::Prepared => {
+            JobState::Pending | JobState::Running => {
                 time::sleep(Duration::from_secs(2)).await;
             }
         }
     }
 }
 
-pub async fn process_request(store: &mut Store, deployment: Deployment) -> Result<()> {
-    let id = deployment.deployment_id;
-    tracing::info!(deployment_id = %id, "processing deployment");
-
-    let result = async {
-        deployment.validate()?;
-        swarm::deploy(&deployment).await
-    }
-    .await;
-    match result {
-        Ok(()) => {
-            store.complete_job(id, JobState::Deployed, None).await?;
-            tracing::info!(deployment_id = %id, "deployment deployed");
-        }
-        Err(error) => {
-            store
-                .complete_job(id, JobState::Failed, Some(&error.to_string()))
-                .await?;
-            tracing::warn!(deployment_id = %id, error = %error, "deployment failed");
-        }
-    }
-    Ok(())
-}
-
 pub async fn status(store: &mut Store, id: Uuid) -> Result<types::DeploymentStatus> {
     let job = store.get_job(id).await?;
-    job.job_state()?;
     Ok(types::DeploymentStatus {
-        deployment_id: job.deployment_uuid()?,
-        application_id: job
-            .application_id
-            .parse()
-            .context("invalid stored application ID")?,
-        state: job.state,
-        image: job.image,
+        deployment_id: job.deployment.deployment_id,
+        application_id: job.deployment.application_id,
+        state: job.state.as_str().to_owned(),
+        image: job.deployment.image,
         error: job.error,
         created_at: job.created_at,
         updated_at: job.updated_at,

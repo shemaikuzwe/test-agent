@@ -70,7 +70,6 @@ impl Deployment {
 pub enum JobState {
     Pending,
     Running,
-    Prepared,
     Deployed,
     Failed,
 }
@@ -80,7 +79,6 @@ impl JobState {
         match self {
             Self::Pending => "pending",
             Self::Running => "running",
-            Self::Prepared => "prepared",
             Self::Deployed => "deployed",
             Self::Failed => "failed",
         }
@@ -90,7 +88,6 @@ impl JobState {
         Ok(match value {
             "pending" => Self::Pending,
             "running" => Self::Running,
-            "prepared" => Self::Prepared,
             "deployed" => Self::Deployed,
             "failed" => Self::Failed,
             _ => anyhow::bail!("unknown stored job state"),

@@ -30,9 +30,7 @@ cargo build --locked --release
 The runner needs no configuration file or hosting API certificates.
 SQLite state is stored in `/var/lib/sl-runner/runner.db`. Run `migrate`
 during installation and after upgrades. It creates the state directory and
-applies pending Diesel migrations. The runner account must be able to write
-to this directory. The migration removing node IDs is forward-only; back up
-an existing database before upgrading.
+applies pending Diesel migrations.
 
 Deployment details are supplied through `submit` and persisted in the local
 queue. Images must be pinned to a SHA-256 digest. Duplicate deployment IDs
@@ -160,4 +158,12 @@ Add repeated `--env KEY=VALUE` arguments to `submit`:
 
 ```sh
 sl-runner submit ... --env NODE_ENV=production --env 'TOKEN=value=with$dollars' --env EMPTY=
+```
+
+## Rollback
+
+Restore a successful deployment from this runner's local history:
+
+```sh
+sl-runner rollback --deployment-id <previous-successful-deployment-id>
 ```

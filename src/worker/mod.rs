@@ -1,9 +1,15 @@
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use tokio::{sync::watch, time};
 
-use crate::{database::Store, deployment};
+use crate::{
+    database::Store,
+    deployment::{
+        self,
+        types::{Deployment, JobState},
+    },
+};
 
 const POLL_INTERVAL: Duration = Duration::from_secs(2);
 const JOB_TIMEOUT: Duration = Duration::from_secs(300);
@@ -29,25 +35,36 @@ pub async fn run(store: &mut Store, mut shutdown: watch::Receiver<bool>) -> Resu
 async fn drain(store: &mut Store, shutdown: &watch::Receiver<bool>) -> Result<bool> {
     let mut worked = false;
     while !*shutdown.borrow() {
-        let Some(job) = store.get_next_job().await? else {
+        let Some(job) = store.claim_next_job().await? else {
             break;
         };
         worked = true;
-        let id = job.deployment_uuid()?;
-        let deployment = job.deployment()?;
-        match time::timeout(JOB_TIMEOUT, deployment::process_request(store, deployment)).await {
-            Ok(result) => result?,
-            Err(_) => {
-                tracing::warn!(deployment_id = %id, "deployment timed out");
-                store
-                    .complete_job(
-                        id,
-                        deployment::types::JobState::Failed,
-                        Some("deployment timed out"),
-                    )
-                    .await?;
-            }
-        }
+        process_job(store, job.deployment).await?;
     }
     Ok(worked)
+}
+
+async fn process_job(store: &mut Store, deployment: Deployment) -> Result<()> {
+    let id = deployment.deployment_id;
+    tracing::info!(deployment_id = %id, "processing deployment");
+    let result = time::timeout(JOB_TIMEOUT, async {
+        deployment.validate()?;
+        deployment::deploy(&deployment).await
+    })
+    .await
+    .unwrap_or_else(|_| Err(anyhow!("deployment timed out")));
+
+    match result {
+        Ok(()) => {
+            store.complete_job(id, JobState::Deployed, None).await?;
+            tracing::info!(deployment_id = %id, "deployment deployed");
+        }
+        Err(error) => {
+            store
+                .complete_job(id, JobState::Failed, Some(&error.to_string()))
+                .await?;
+            tracing::warn!(deployment_id = %id, error = %error, "deployment failed");
+        }
+    }
+    Ok(())
 }

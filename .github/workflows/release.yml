@@ -1,0 +1,124 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]*.[0-9]*.[0-9]*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build Linux ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    env:
+      VERSION: ${{ github.ref_name }}
+      ARCH: ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Validate release version
+        shell: bash
+        run: |
+          [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo 'Release tags must use vMAJOR.MINOR.PATCH.' >&2
+            exit 1
+          }
+          package_version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')
+          [[ "$VERSION" == "v$package_version" ]] || {
+            echo 'Release tag must match the version in Cargo.toml.' >&2
+            exit 1
+          }
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsqlite3-dev
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Test and build
+        run: |
+          cargo test --locked
+          cargo build --locked --release
+          target/release/sl-runner --version
+
+      - name: Package installation files
+        shell: bash
+        run: |
+          mkdir -p package/sl-runner/scripts dist
+          install -m 0755 target/release/sl-runner package/sl-runner/sl-runner
+          install -m 0755 scripts/install.sh package/sl-runner/scripts/install.sh
+          install -m 0644 sl-runner.service caddy-stack.yaml package/sl-runner/
+          tar -czf "dist/sl-runner-$VERSION-linux-$ARCH.tar.gz" -C package sl-runner
+
+      - uses: actions/upload-artifact@v6
+        with:
+          name: release-${{ matrix.arch }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  publish:
+    name: Publish release
+    needs: build
+    runs-on: ubuntu-24.04
+    env:
+      GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+      RELEASE_REPOSITORY: ${{ vars.RELEASE_REPOSITORY }}
+      VERSION: ${{ github.ref_name }}
+    steps:
+
+      - uses: actions/download-artifact@v6
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+
+      - name: Publish archives and checksums
+        working-directory: dist
+        shell: bash
+        run: |
+          sha256sum ./*.tar.gz > SHA256SUMS
+          printf 'Linux amd64 and arm64 installation bundles for Ubuntu 24 or newer.\n\nEach archive contains the runner binary, installer, systemd unit, and Caddy configuration.\nVerify your archive against SHA256SUMS before installation.\n' > release-notes.md
+          # Create the tag in the public repository; never push private source history.
+          gh release create "$VERSION" ./*.tar.gz SHA256SUMS \
+            --repo "$RELEASE_REPOSITORY" --title "sl-runner $VERSION" \
+            --notes-file release-notes.md --draft
+          gh release edit "$VERSION" --repo "$RELEASE_REPOSITORY" --draft=false
+
+  # publish-server:
+  #   name: Mirror release to server
+  #   needs: publish
+  #   if: ${{ vars.SERVER_HOST != '' }}
+  #   runs-on: ubuntu-24.04
+  #   steps:
+  #     - uses: actions/download-artifact@v6
+  #       with:
+  #         pattern: release-*
+  #         path: dist
+  #         merge-multiple: true
+
+  #     - name: Generate checksums
+  #       working-directory: dist
+  #       run: sha256sum ./*.tar.gz > SHA256SUMS
+
+  #     - name: Upload archives and checksums
+  #       uses: appleboy/scp-action@v1
+  #       with:
+  #         host: ${{ vars.SERVER_HOST }}
+  #         username: ${{ vars.SERVER_USER }}
+  #         key: ${{ secrets.SERVER_SSH_KEY }}
+  #         source: dist/*.tar.gz,dist/SHA256SUMS
+  #         target: /srv/sl-runner/releases/${{ github.ref_name }}
+  #         strip_components: 1
