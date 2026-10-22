@@ -66,7 +66,8 @@ impl Deployment {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
 pub enum JobState {
     Pending,
     Running,
@@ -100,7 +101,7 @@ impl JobState {
 pub struct DeploymentStatus {
     pub deployment_id: Uuid,
     pub application_id: Uuid,
-    pub state: String,
+    pub state: JobState,
     pub image: String,
     pub error: Option<String>,
     pub created_at: i64,

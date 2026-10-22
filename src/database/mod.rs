@@ -197,8 +197,10 @@ impl Store {
             .select(JobRecord::as_select())
             .first(&mut self.connection)
             .await
-            .context("read deployment state")?
+            .context("read deployment state")
+            .context(crate::response::ErrorCode::DatabaseError)?
             .try_into()
+            .context(crate::response::ErrorCode::DatabaseError)
     }
 
     pub async fn complete_job(

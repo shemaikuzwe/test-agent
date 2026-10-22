@@ -1,12 +1,13 @@
 [package]
 name = "sl-runner"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2024"
 rust-version = "1.89"
 publish = false
 
 [dependencies]
 anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 clap = { version = "4", features = ["derive"] }
 diesel = { version = "2.3", default-features = false, features = ["sqlite"] }
 diesel-async = { version = "0.9", features = ["sqlite", "migrations"] }

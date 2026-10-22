@@ -1,10 +1,7 @@
 # sl-runner
 
-A Rust runner for platform-managed Scriptylabs Nodes. One project owns a Node;
-customers do not receive root access. One persistent systemd daemon processes
-the local deployment queue. Hosting Service invokes `submit` to enqueue work with all
-required deployment details. There is no public agent listener, backend long
-polling, or permanent backend connection.
+A Rust runner for platform-managed Scriptylabs Nodes. One project owns a Node;one persistent systemd daemon processes the local deployment queue. Hosting Service invokes `submit` to enqueue work with all
+required deployment details.
 
 ## Build prerequisites
 
@@ -25,17 +22,6 @@ cargo test --locked
 cargo build --locked --release
 ```
 
-## Local state
-
-The runner needs no configuration file or hosting API certificates.
-SQLite state is stored in `/var/lib/sl-runner/runner.db`. Run `migrate`
-during installation and after upgrades. It creates the state directory and
-applies pending Diesel migrations.
-
-Deployment details are supplied through `submit` and persisted in the local
-queue. Images must be pinned to a SHA-256 digest. Duplicate deployment IDs
-keep their original queued payload.
-
 ## Installation
 
 On an Ubuntu 24.04 or newer VM, install the published release with:
@@ -47,34 +33,12 @@ curl -fsSL https://github.com/shemaikuzwe/test-agent/releases/latest/download/in
 The current installer configures an HTTP registry and HTTP application routing.
 Log in as the runner afterward to pull private Harbor images (see below).
 
-For installation from a local build, run `scripts/install.sh` as root inside
-the VM with the Linux binary, `sl-runner.service`, and `caddy-stack.yaml`
-available in their existing relative paths.
 
-For the local development runner at `10.43.251.5`, using Harbor over HTTP at
-`10.43.251.159`:
+For the local development runner 
 
 ```sh
 sudo bash scripts/install.sh --registry 10.43.251.159
 ```
-
-## systemd installation
-
-Create a system account named `sl-runner` with a matching group and no login
-shell. Install the release binary and daemon unit:
-
-```sh
-sudo install -d -m 0755 /opt/sl-runner
-sudo install -m 0755 target/release/sl-runner /opt/sl-runner/sl-runner
-sudo install -d -m 0755 /usr/local/bin
-sudo ln -sfn /opt/sl-runner/sl-runner /usr/local/bin/sl-runner
-sudo install -m 0644 sl-runner.service /etc/systemd/system/
-sudo install -d -o sl-runner -g sl-runner -m 0700 /var/lib/sl-runner
-sudo -u sl-runner sl-runner migrate
-sudo systemctl daemon-reload
-sudo systemctl enable --now sl-runner.service
-```
-
 
 The daemon starts at boot and restarts on failure. It checks the local queue
 and processes jobs sequentially. On shutdown, it lets the current job finish;
@@ -186,3 +150,65 @@ git tag v0.1.0
 git push origin v0.1.0
 
 ```
+
+## Programmatic command responses
+
+Commands write exactly one JSON result followed by a newline to stdout. Diagnostic
+logs go to stderr and retain their tracing format. Parse stdout separately rather
+than combining both streams. `daemon` writes its result when it exits; its startup
+and operational messages are logs.
+
+Every result has `timestamp` (UTC RFC 3339), `command`, `status`, and `data`.
+`status` is `SUCCESS` or `ERROR` and describes the command outcome. Deployment
+`state` is separately one of `pending`, `running`, `deployed`, or `failed`.
+A successful `status` lookup can therefore return a failed deployment.
+
+Exit codes are `0` for success, `1` for execution/output failures, and `2` for
+invalid arguments. `--help` and `--version` remain text and exit successfully.
+Argument errors use `command: null` when no recognized command was supplied and
+`data: {}`. Their messages omit supplied values, which may contain secrets.
+
+Example successful wait:
+
+```json
+{
+  "timestamp": "2026-10-22T13:04:47.687650Z",
+  "command": "wait",
+  "status": "SUCCESS",
+  "data": {
+    "message": "deployment deployed",
+    "deploymentId": "bdd03f0a-55e4-4c9e-96cc-4f47d458ee99",
+    "state": "deployed"
+  }
+}
+```
+
+Errors add an `error` object with a stable `code` and informational `message`:
+
+```json
+{
+  "timestamp": "2026-10-22T13:04:47.687650Z",
+  "command": "wait",
+  "status": "ERROR",
+  "data": {
+    "deploymentId": "bdd03f0a-55e4-4c9e-96cc-4f47d458ee99",
+    "state": "failed",
+    "message": "deployment failed"
+  },
+  "error": {
+    "code": "DEPLOYMENT_FAILED",
+    "message": "recorded deployment failure reason"
+  }
+}
+```
+
+| Error code | Meaning |
+| --- | --- |
+| `INVALID_ARGUMENT` | Invalid CLI arguments or deployment input |
+| `DEPLOYMENT_NOT_FOUND` | Deployment ID is absent from local history |
+| `DEPLOYMENT_FAILED` | `wait` observed a failed deployment |
+| `INVALID_ROLLBACK_TARGET` | Target deployment was not successful |
+| `APPLICATION_NOT_FOUND` | Application service is absent from Swarm |
+| `DATABASE_ERROR` | State directory, SQLite, or migration operation failed |
+| `DOCKER_ERROR` | Docker execution or inspection failed |
+| `INTERNAL_ERROR` | Unexpected runner failure |

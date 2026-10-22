@@ -6,6 +6,8 @@ use serde_json::{Value, json};
 use tokio::{io::AsyncWriteExt, process::Command, time};
 use uuid::Uuid;
 
+use crate::response::ErrorCode;
+
 use super::types::{Deployment, RunningDeployment};
 
 const DEPLOYMENT_LABEL: &str = "sl-runner.deployment-id";
@@ -100,8 +102,30 @@ async fn inspect_tasks(service_name: &str) -> Result<Vec<Value>> {
 }
 
 pub async fn running(application_id: Uuid) -> Result<Vec<RunningDeployment>> {
-    let tasks = inspect_tasks(&format!("sl-{application_id}_app")).await?;
-    running_deployments(&tasks)
+    let service = format!("sl-{application_id}_app");
+    // Listing gives a structured absence result; Docker CLI failure text is not a contract.
+    let output = docker(
+        &[
+            "service",
+            "ls",
+            "--filter",
+            &format!("name={service}"),
+            "--format",
+            "{{.Name}}",
+        ],
+        None,
+    )
+    .await
+    .context(ErrorCode::DockerError)?;
+    let names = std::str::from_utf8(&output).context(ErrorCode::DockerError)?;
+    if !names.lines().any(|name| name == service) {
+        return Err(anyhow::anyhow!("application service not found")
+            .context(ErrorCode::ApplicationNotFound));
+    }
+    let tasks = inspect_tasks(&service)
+        .await
+        .context(ErrorCode::DockerError)?;
+    running_deployments(&tasks).context(ErrorCode::DockerError)
 }
 
 fn running_deployments(tasks: &[Value]) -> Result<Vec<RunningDeployment>> {
