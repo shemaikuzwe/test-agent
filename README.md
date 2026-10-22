@@ -60,14 +60,11 @@ systemctl status sl-runner.service
 journalctl -u sl-runner.service -f
 ```
 
-For upgrades, stop the daemon, install the new binary, apply migrations, then
-start it again:
+Upgrade to the latest published release, or select a specific version:
 
 ```sh
-sudo systemctl stop sl-runner.service
-sudo install -m 0755 target/release/sl-runner /opt/sl-runner/sl-runner
-sudo -u sl-runner sl-runner migrate
-sudo systemctl start sl-runner.service
+sudo sl-runner upgrade
+sudo sl-runner upgrade --version v0.2.0
 ```
 
 ## Swarm execution

@@ -13,6 +13,7 @@ use crate::deployment::types::{DeploymentStatus, JobState, RunningDeployment};
 #[derive(Clone, Copy, Debug, Serialize, ValueEnum)]
 #[serde(rename_all = "lowercase")]
 pub enum CommandName {
+    Upgrade,
     Migrate,
     Submit,
     Rollback,
@@ -117,6 +118,9 @@ impl<T: Serialize> Response<T> {
 #[derive(Debug, Serialize)]
 #[serde(untagged, rename_all_fields = "camelCase")]
 pub enum CommandData {
+    Upgrade {
+        message: &'static str,
+    },
     Migrate {
         message: &'static str,
     },

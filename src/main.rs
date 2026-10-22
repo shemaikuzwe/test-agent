@@ -24,6 +24,10 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    Upgrade {
+        #[arg(long)]
+        version: Option<String>,
+    },
     Migrate,
     Submit {
         #[arg(long)]
@@ -61,6 +65,7 @@ impl Command {
     fn context(&self) -> (CommandName, ErrorData) {
         let mut data = ErrorData::default();
         let name = match self {
+            Self::Upgrade { .. } => CommandName::Upgrade,
             Self::Migrate => CommandName::Migrate,
             Self::Submit {
                 deployment_id,
@@ -158,6 +163,20 @@ async fn main() -> ExitCode {
 
 async fn run(cli: Cli, state_dir: &Path) -> Result<CommandData> {
     match cli.command {
+        Command::Upgrade { version } => {
+            let status = tokio::process::Command::new("bash")
+                .arg("-c")
+                .arg(include_str!("../scripts/upgrade.sh"))
+                .arg("sl-runner upgrade")
+                .arg(version.unwrap_or_else(|| "latest".to_owned()))
+                .stdout(std::process::Stdio::from(std::io::stderr()))
+                .status()
+                .await?;
+            ensure!(status.success(), "upgrade failed; see stderr for details");
+            Ok(CommandData::Upgrade {
+                message: "requested runner version is installed; service is active",
+            })
+        }
         Command::Migrate => {
             Store::migrate(state_dir)
                 .await
