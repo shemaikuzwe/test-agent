@@ -24,6 +24,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Check whether the installed runner service is active.
+    Health,
     Upgrade {
         #[arg(long)]
         version: Option<String>,
@@ -65,6 +67,7 @@ impl Command {
     fn context(&self) -> (CommandName, ErrorData) {
         let mut data = ErrorData::default();
         let name = match self {
+            Self::Health => CommandName::Health,
             Self::Upgrade { .. } => CommandName::Upgrade,
             Self::Migrate => CommandName::Migrate,
             Self::Submit {
@@ -163,6 +166,28 @@ async fn main() -> ExitCode {
 
 async fn run(cli: Cli, state_dir: &Path) -> Result<CommandData> {
     match cli.command {
+        Command::Health => {
+            let output = tokio::process::Command::new("systemctl")
+                .args(["is-active", "sl-runner.service"])
+                .output()
+                .await
+                .context("check sl-runner.service")
+                .context(ErrorCode::HealthCheckFailed)?;
+            let state = String::from_utf8_lossy(&output.stdout).trim().to_owned();
+            if !output.status.success() || state != "active" {
+                let detail = if state.is_empty() {
+                    String::from_utf8_lossy(&output.stderr).trim().to_owned()
+                } else {
+                    state
+                };
+                return Err(anyhow::anyhow!("runner service is not active: {detail}")
+                    .context(ErrorCode::HealthCheckFailed));
+            }
+            Ok(CommandData::Health {
+                service: "sl-runner.service",
+                running: true,
+            })
+        }
         Command::Upgrade { version } => {
             let status = tokio::process::Command::new("bash")
                 .arg("-c")

@@ -67,6 +67,12 @@ sudo sl-runner upgrade
 sudo sl-runner upgrade --version v0.2.0
 ```
 
+Check whether the installed runner daemon is running (no root required):
+
+```sh
+sl-runner health
+```
+
 ## Swarm execution
 
 Install Docker Engine and its CLI in the project-owned VM before starting the
