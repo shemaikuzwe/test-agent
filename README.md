@@ -36,12 +36,20 @@ Deployment details are supplied through `submit` and persisted in the local
 queue. Images must be pinned to a SHA-256 digest. Duplicate deployment IDs
 keep their original queued payload.
 
-## Automated Ubuntu installation
+## Installation
 
-Run `scripts/install.sh` as root inside the runner VM. Supply a Linux runner
-binary compatible with the VM.
-Copy `scripts/install.sh`, `sl-runner.service`, and `caddy-stack.yaml` together, preserving their
-relative paths. No Rust toolchain is needed inside the VM.
+On an Ubuntu 24.04 or newer VM, install the published release with:
+
+```sh
+curl -fsSL https://github.com/shemaikuzwe/test-agent/releases/latest/download/install.sh | sudo bash -s -- --registry 10.43.251.159
+```
+
+The current installer configures an HTTP registry and HTTP application routing.
+Log in as the runner afterward to pull private Harbor images (see below).
+
+For installation from a local build, run `scripts/install.sh` as root inside
+the VM with the Linux binary, `sl-runner.service`, and `caddy-stack.yaml`
+available in their existing relative paths.
 
 For the local development runner at `10.43.251.5`, using Harbor over HTTP at
 `10.43.251.159`:
@@ -58,9 +66,11 @@ shell. Install the release binary and daemon unit:
 ```sh
 sudo install -d -m 0755 /opt/sl-runner
 sudo install -m 0755 target/release/sl-runner /opt/sl-runner/sl-runner
+sudo install -d -m 0755 /usr/local/bin
+sudo ln -sfn /opt/sl-runner/sl-runner /usr/local/bin/sl-runner
 sudo install -m 0644 sl-runner.service /etc/systemd/system/
 sudo install -d -o sl-runner -g sl-runner -m 0700 /var/lib/sl-runner
-sudo -u sl-runner /opt/sl-runner/sl-runner migrate
+sudo -u sl-runner sl-runner migrate
 sudo systemctl daemon-reload
 sudo systemctl enable --now sl-runner.service
 ```
@@ -73,7 +83,7 @@ after a restart, it requeues interrupted jobs.
 From an Incus client with access to the VM, enqueue a deployment:
 
 ```sh
-incus exec <vm-name> -- sudo -u sl-runner /opt/sl-runner/sl-runner submit \
+incus exec <vm-name> -- sudo -u sl-runner sl-runner submit \
   --deployment-id 00000000-0000-4000-8000-000000000002 \
   --application-id 00000000-0000-4000-8000-000000000003 \
   --image registry.example.com/project/app@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa \
@@ -92,7 +102,7 @@ start it again:
 ```sh
 sudo systemctl stop sl-runner.service
 sudo install -m 0755 target/release/sl-runner /opt/sl-runner/sl-runner
-sudo -u sl-runner /opt/sl-runner/sl-runner migrate
+sudo -u sl-runner sl-runner migrate
 sudo systemctl start sl-runner.service
 ```
 
@@ -114,7 +124,7 @@ labels and refresh routes. Proxy configuration is in `caddy-stack.yaml`.
 Supply both `--hostname` and `--port` to expose an application over HTTP:
 
 ```sh
-sudo -u sl-runner /opt/sl-runner/sl-runner submit \
+sudo -u sl-runner sl-runner submit \
   --deployment-id "$(cat /proc/sys/kernel/random/uuid)" \
   --application-id 00000000-0000-4000-8000-000000000002 \
   --image 10.43.251.159/library/me@sha256:7af09b9e96856e36399145a6205f4cf6e42c05e8c2bfdd2404d40fa114075eee \

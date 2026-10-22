@@ -16,10 +16,20 @@ installation_failed() {
 trap installation_failed ERR
 
 registry=''
-script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-install_dir=$(dirname -- "$script_dir")
+version=''
+script_dir=''
+install_dir=''
+# Bash has no source path when the script is piped through stdin.
+if [[ -n ${BASH_SOURCE[0]:-} ]]; then
+  script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
+  install_dir=$(dirname -- "$script_dir")
+fi
 while (($#)); do
   case "$1" in
+    --version)
+      [[ $# -ge 2 && -n $2 ]] || { echo 'Missing value for --version' >&2; exit 1; }
+      version=$2
+      shift 2 ;;
     --registry)
       [[ $# -ge 2 && -n $2 ]] || { echo 'Missing value for --registry' >&2; exit 1; }
       registry=$2
@@ -32,16 +42,56 @@ step=1
 printf '%s[1/9] Checking installation inputs and host...%s\n' "$blue" "$reset"
 [[ $EUID -eq 0 ]] || { echo 'Run as root.' >&2; exit 1; }
 [[ -n $registry ]] || { echo 'Required argument: --registry HOST[:PORT]' >&2; exit 1; }
-binary=$install_dir/sl-runner
-[[ -f $binary ]] || binary=$install_dir/target/release/sl-runner
-[[ -f $binary ]] || binary=/opt/sl-runner/sl-runner
-for file in "$binary" "$script_dir/../sl-runner.service" "$install_dir/caddy-stack.yaml"; do
-  [[ -f $file && -r $file ]] || { echo "Cannot read $file" >&2; exit 1; }
-done
 [[ -d /run/systemd/system ]] || { echo 'A running systemd is required.' >&2; exit 1; }
 # shellcheck source=/dev/null
 . /etc/os-release
 [[ $ID == ubuntu ]] || { echo 'This installer supports Ubuntu.' >&2; exit 1; }
+
+staging=$(mktemp -d)
+trap 'rm -rf -- "$staging"' EXIT
+binary=$install_dir/sl-runner
+[[ -f $binary ]] || binary=$install_dir/target/release/sl-runner
+[[ -f $binary ]] || binary=/opt/sl-runner/sl-runner
+if [[ -n $version || -z $install_dir || ! -f $binary || ! -f $install_dir/sl-runner.service || ! -f $install_dir/caddy-stack.yaml ]]; then
+  repository='shemaikuzwe/test-agent'
+  version=${version:-latest}
+  case "$(uname -m)" in
+    x86_64) architecture=amd64 ;;
+    aarch64|arm64) architecture=arm64 ;;
+    *) echo 'Supported architectures: amd64 and arm64.' >&2; exit 1 ;;
+  esac
+  for dependency in curl tar sha256sum; do
+    command -v "$dependency" >/dev/null || { echo "Required command: $dependency" >&2; exit 1; }
+  done
+  if [[ $version == latest ]]; then
+    release_url=$(curl -fsSL -o /dev/null -w '%{url_effective}' "https://github.com/$repository/releases/latest")
+    version=${release_url##*/}
+  fi
+  [[ $version =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+    echo 'Version must use vMAJOR.MINOR.PATCH, or latest.' >&2; exit 1;
+  }
+  archive="sl-runner-$version-linux-$architecture.tar.gz"
+  download_url="https://github.com/$repository/releases/download/$version"
+  printf 'Downloading sl-runner %s for Linux %s...\n' "$version" "$architecture"
+  curl -fsSL "$download_url/$archive" -o "$staging/$archive"
+  curl -fsSL "$download_url/SHA256SUMS" -o "$staging/SHA256SUMS"
+  mkdir "$staging/release"
+  (
+    cd "$staging"
+    awk -v archive="$archive" '$2 == archive || $2 == "./" archive' SHA256SUMS > archive.sha256
+    [[ $(wc -l < archive.sha256) -eq 1 ]] || {
+      echo 'Expected exactly one archive checksum.' >&2; exit 1;
+    }
+    sha256sum --check archive.sha256
+    tar -xzf "$archive" -C release
+  )
+  install_dir=$staging/release/sl-runner
+  script_dir=$install_dir/scripts
+  binary=$install_dir/sl-runner
+fi
+for file in "$binary" "$script_dir/../sl-runner.service" "$install_dir/caddy-stack.yaml"; do
+  [[ -f $file && -r $file ]] || { echo "Cannot read $file" >&2; exit 1; }
+done
 
 step=2
 printf '%s[2/9] Installing Docker and runtime dependencies...%s\n' "$blue" "$reset"
@@ -56,8 +106,6 @@ fi
 
 step=3
 printf '%s[3/9] Preparing runner files...%s\n' "$blue" "$reset"
-staging=$(mktemp -d)
-trap 'rm -rf -- "$staging"' EXIT
 # Stage inputs before replacing installed files, including when upgrading in place.
 install -m 0755 "$binary" "$staging/sl-runner"
 install -m 0644 "$script_dir/../sl-runner.service" "$staging/sl-runner.service"
@@ -131,6 +179,8 @@ printf '%s[8/9] Installing the runner and database migrations...%s\n' "$blue" "$
 install -d -o root -g sl-runner -m 0750 /etc/sl-runner
 install -d -o sl-runner -g sl-runner -m 0700 /etc/sl-runner/docker /var/lib/sl-runner
 install -m 0755 "$staging/sl-runner" /opt/sl-runner/sl-runner
+install -d -m 0755 /usr/local/bin
+ln -sfn /opt/sl-runner/sl-runner /usr/local/bin/sl-runner
 install -m 0644 "$staging/sl-runner.service" /etc/systemd/system/sl-runner.service
 runuser -u sl-runner -- /opt/sl-runner/sl-runner migrate
 step=9

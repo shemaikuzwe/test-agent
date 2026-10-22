@@ -80,6 +80,9 @@ jobs:
       GH_REPO: ${{ github.repository }}
       VERSION: ${{ github.ref_name }}
     steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
 
       - uses: actions/download-artifact@v6
         with:
@@ -91,9 +94,10 @@ jobs:
         working-directory: dist
         shell: bash
         run: |
-          sha256sum ./*.tar.gz > SHA256SUMS
+          install -m 0755 ../scripts/install.sh install.sh
+          sha256sum ./*.tar.gz install.sh > SHA256SUMS
           printf 'Linux amd64 and arm64 installation bundles for Ubuntu 24 or newer.\n\nEach archive contains the runner binary, installer, systemd unit, and Caddy configuration.\nVerify your archive against SHA256SUMS before installation.\n' > release-notes.md
-          gh release create "$VERSION" ./*.tar.gz SHA256SUMS \
+          gh release create "$VERSION" ./*.tar.gz install.sh SHA256SUMS \
             --title "sl-runner $VERSION" \
             --notes-file release-notes.md --draft
           gh release edit "$VERSION" --draft=false
@@ -104,6 +108,10 @@ jobs:
   #   if: ${{ vars.SERVER_HOST != '' }}
   #   runs-on: ubuntu-24.04
   #   steps:
+  #     - uses: actions/checkout@v6
+  #       with:
+  #         persist-credentials: false
+  #
   #     - uses: actions/download-artifact@v6
   #       with:
   #         pattern: release-*
@@ -112,7 +120,9 @@ jobs:
 
   #     - name: Generate checksums
   #       working-directory: dist
-  #       run: sha256sum ./*.tar.gz > SHA256SUMS
+  #       run: |
+  #         install -m 0755 ../scripts/install.sh install.sh
+  #         sha256sum ./*.tar.gz install.sh > SHA256SUMS
 
   #     - name: Upload archives and checksums
   #       uses: appleboy/scp-action@v1
@@ -120,6 +130,6 @@ jobs:
   #         host: ${{ vars.SERVER_HOST }}
   #         username: ${{ vars.SERVER_USER }}
   #         key: ${{ secrets.SERVER_SSH_KEY }}
-  #         source: dist/*.tar.gz,dist/SHA256SUMS
+  #         source: dist/*.tar.gz,dist/install.sh,dist/SHA256SUMS
   #         target: /srv/sl-runner/releases/${{ github.ref_name }}
   #         strip_components: 1
