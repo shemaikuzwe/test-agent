@@ -73,9 +73,11 @@ jobs:
     name: Publish release
     needs: build
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
     env:
-      GH_TOKEN: ${{ secrets.RELEASE_TOKEN }}
-      RELEASE_REPOSITORY: ${{ vars.RELEASE_REPOSITORY }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
       VERSION: ${{ github.ref_name }}
     steps:
 
@@ -91,11 +93,10 @@ jobs:
         run: |
           sha256sum ./*.tar.gz > SHA256SUMS
           printf 'Linux amd64 and arm64 installation bundles for Ubuntu 24 or newer.\n\nEach archive contains the runner binary, installer, systemd unit, and Caddy configuration.\nVerify your archive against SHA256SUMS before installation.\n' > release-notes.md
-          # Create the tag in the public repository; never push private source history.
           gh release create "$VERSION" ./*.tar.gz SHA256SUMS \
-            --repo "$RELEASE_REPOSITORY" --title "sl-runner $VERSION" \
+            --title "sl-runner $VERSION" \
             --notes-file release-notes.md --draft
-          gh release edit "$VERSION" --repo "$RELEASE_REPOSITORY" --draft=false
+          gh release edit "$VERSION" --draft=false
 
   # publish-server:
   #   name: Mirror release to server

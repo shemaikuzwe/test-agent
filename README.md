@@ -167,3 +167,12 @@ Restore a successful deployment from this runner's local history:
 ```sh
 sl-runner rollback --deployment-id <previous-successful-deployment-id>
 ```
+
+### Publishing new version
+
+```sh
+
+git tag v0.1.0
+git push origin v0.1.0
+
+```
