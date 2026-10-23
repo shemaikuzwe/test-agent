@@ -24,7 +24,10 @@ cargo build --locked --release
 
 ## Installation
 
-On an Ubuntu 24.04 or newer VM, install the published release with:
+Docker Engine and its CLI must already be installed on the Ubuntu 24.04 or newer
+VM. The installer checks for both and does not install Docker.
+
+Install the published release with:
 
 ```sh
 curl -fsSL https://github.com/shemaikuzwe/test-agent/releases/latest/download/install.sh | sudo bash -s -- --registry 10.43.251.159

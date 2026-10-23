@@ -46,6 +46,11 @@ printf '%s[1/9] Checking installation inputs and host...%s\n' "$blue" "$reset"
 # shellcheck source=/dev/null
 . /etc/os-release
 [[ $ID == ubuntu ]] || { echo 'This installer supports Ubuntu.' >&2; exit 1; }
+for dependency in docker dockerd; do
+  command -v "$dependency" >/dev/null || {
+    echo 'Docker Engine and its CLI must be installed before running this installer.' >&2; exit 1;
+  }
+done
 
 staging=$(mktemp -d)
 trap 'rm -rf -- "$staging"' EXIT
@@ -94,15 +99,9 @@ for file in "$binary" "$script_dir/../sl-runner.service" "$install_dir/caddy-sta
 done
 
 step=2
-printf '%s[2/9] Installing Docker and runtime dependencies...%s\n' "$blue" "$reset"
+printf '%s[2/9] Installing runtime dependencies...%s\n' "$blue" "$reset"
 apt-get update
 DEBIAN_FRONTEND=noninteractive apt-get install -y ca-certificates jq libsqlite3-0
-# Preserve an existing Docker installation; use Ubuntu packages on fresh VMs.
-if ! command -v docker >/dev/null; then
-  DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io
-else
-  printf '%s  Docker is already installed; keeping it.%s\n' "$green" "$reset"
-fi
 
 step=3
 printf '%s[3/9] Preparing runner files...%s\n' "$blue" "$reset"
