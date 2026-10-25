@@ -16,6 +16,7 @@ installation_failed() {
 trap installation_failed ERR
 
 registry=''
+loki_url=''
 version=''
 script_dir=''
 install_dir=''
@@ -33,6 +34,13 @@ while (($#)); do
     --registry)
       [[ $# -ge 2 && -n $2 ]] || { echo 'Missing value for --registry' >&2; exit 1; }
       registry=$2
+      shift 2 ;;
+    --loki-url)
+      [[ $# -ge 2 && -n $2 ]] || { echo 'Missing value for --loki-url' >&2; exit 1; }
+      loki_url=$2
+      [[ $loki_url =~ ^https?://[^[:space:]]+$ ]] || {
+        echo 'Loki URL must be an HTTP or HTTPS push endpoint, without whitespace.' >&2; exit 1;
+      }
       shift 2 ;;
     *) echo "Unknown argument: $1" >&2; exit 1 ;;
   esac
@@ -97,6 +105,11 @@ fi
 for file in "$binary" "$script_dir/../sl-runner.service" "$install_dir/caddy-stack.yaml"; do
   [[ -f $file && -r $file ]] || { echo "Cannot read $file" >&2; exit 1; }
 done
+if [[ -n $loki_url ]]; then
+  for file in "$install_dir/alloy-stack.yaml" "$install_dir/runtime.alloy"; do
+    [[ -f $file && -r $file ]] || { echo "Cannot read $file" >&2; exit 1; }
+  done
+fi
 
 step=2
 printf '%s[2/9] Installing runtime dependencies...%s\n' "$blue" "$reset"
@@ -172,6 +185,13 @@ if ! docker network inspect sl-proxy >/dev/null 2>&1; then
 fi
 install -m 0644 "$install_dir/caddy-stack.yaml" /opt/sl-runner/caddy-stack.yaml
 docker stack deploy --compose-file /opt/sl-runner/caddy-stack.yaml sl-proxy
+
+if [[ -n $loki_url ]]; then
+  printf '%s  Installing Alloy runtime log collection...%s\n' "$blue" "$reset"
+  install -m 0644 "$install_dir/alloy-stack.yaml" /opt/sl-runner/alloy-stack.yaml
+  install -m 0644 "$install_dir/runtime.alloy" /opt/sl-runner/runtime.alloy
+  LOKI_PUSH_URL="$loki_url" docker stack deploy --compose-file /opt/sl-runner/alloy-stack.yaml sl-logs
+fi
 
 step=8
 printf '%s[8/9] Installing the runner and database migrations...%s\n' "$blue" "$reset"

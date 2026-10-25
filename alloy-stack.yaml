@@ -1,0 +1,25 @@
+version: "3.8"
+
+services:
+  alloy:
+    image: grafana/alloy:v1.14.0
+    command: ["run", "--storage.path=/var/lib/alloy", "/etc/alloy/config.alloy"]
+    environment:
+      LOKI_PUSH_URL: "${LOKI_PUSH_URL}"
+    configs:
+      - source: runtime_alloy
+        target: /etc/alloy/config.alloy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - alloy_data:/var/lib/alloy
+    deploy:
+      mode: global
+      restart_policy:
+        condition: any
+
+configs:
+  runtime_alloy:
+    file: ./runtime.alloy
+
+volumes:
+  alloy_data: {}

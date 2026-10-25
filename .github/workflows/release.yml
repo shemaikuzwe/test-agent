@@ -60,7 +60,7 @@ jobs:
           mkdir -p package/sl-runner/scripts dist
           install -m 0755 target/release/sl-runner package/sl-runner/sl-runner
           install -m 0755 scripts/install.sh package/sl-runner/scripts/install.sh
-          install -m 0644 sl-runner.service caddy-stack.yaml package/sl-runner/
+          install -m 0644 sl-runner.service caddy-stack.yaml alloy-stack.yaml runtime.alloy package/sl-runner/
           tar -czf "dist/sl-runner-$VERSION-linux-$ARCH.tar.gz" -C package sl-runner
 
       - uses: actions/upload-artifact@v6

@@ -1,0 +1,49 @@
+discovery.docker "apps" {
+	host = "unix:///var/run/docker.sock"
+
+	filter {
+		name   = "label"
+		values = ["sl-runner.application-id", "sl-runner.deployment-id"]
+	}
+}
+
+discovery.relabel "apps" {
+	targets = discovery.docker.apps.targets
+
+	rule {
+		target_label = "app"
+		replacement  = "sl-runner"
+	}
+
+	rule {
+		target_label = "log_type"
+		replacement  = "runtime"
+	}
+
+	rule {
+		source_labels = ["__meta_docker_container_label_sl_runner_application_id"]
+		target_label  = "applicationId"
+	}
+
+	rule {
+		source_labels = ["__meta_docker_container_label_sl_runner_deployment_id"]
+		target_label  = "deploymentId"
+	}
+
+	rule {
+		source_labels = ["__meta_docker_container_id"]
+		target_label  = "containerId"
+	}
+}
+
+loki.source.docker "apps" {
+	host       = "unix:///var/run/docker.sock"
+	targets    = discovery.relabel.apps.output
+	forward_to = [loki.write.central.receiver]
+}
+
+loki.write "central" {
+	endpoint {
+		url = sys.env("LOKI_PUSH_URL")
+	}
+}

@@ -30,7 +30,9 @@ VM. The installer checks for both and does not install Docker.
 Install the published release with:
 
 ```sh
-curl -fsSL https://github.com/shemaikuzwe/test-agent/releases/latest/download/install.sh | sudo bash -s -- --registry 10.43.251.159
+curl -fsSL https://github.com/shemaikuzwe/test-agent/releases/latest/download/install.sh | sudo bash -s -- \
+  --registry 10.43.251.159 \
+  --loki-url http://192.168.1.78:3100/loki/api/v1/push
 ```
 
 The current installer configures an HTTP registry and HTTP application routing.
@@ -41,6 +43,13 @@ For the local development runner
 
 ```sh
 sudo bash scripts/install.sh --registry 10.43.251.159
+```
+
+To also install runtime log collection, pass the central Loki push endpoint:
+
+```sh
+sudo bash scripts/install.sh --registry 10.43.251.159 \
+  --loki-url http://192.168.1.78:3100/loki/api/v1/push
 ```
 
 The daemon starts at boot and restarts on failure. It checks the local queue
