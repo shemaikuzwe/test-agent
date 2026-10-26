@@ -87,19 +87,40 @@ pub(crate) async fn deploy(deployment: &Deployment) -> Result<()> {
 }
 
 async fn inspect_tasks(service_name: &str) -> Result<Vec<Value>> {
-    let output = docker(
-        &["service", "ps", "--quiet", "--no-trunc", service_name],
-        None,
-    )
-    .await?;
-    let ids = std::str::from_utf8(&output).context("parse task IDs")?;
-    let ids: Vec<&str> = ids.split_whitespace().collect();
-    if ids.is_empty() {
-        return Ok(Vec::new());
+    for attempt in 0..3 {
+        let output = docker(
+            &["service", "ps", "--quiet", "--no-trunc", service_name],
+            None,
+        )
+        .await?;
+        let ids = std::str::from_utf8(&output).context("parse task IDs")?;
+        let ids: Vec<&str> = ids.split_whitespace().collect();
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut args = vec!["inspect", "--type", "task"];
+        args.extend(&ids);
+        let output = docker_output(&args, None).await?;
+        if output.status.success() {
+            return serde_json::from_slice(&output.stdout).context("parse task inspection");
+        }
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr = stderr.trim();
+        // Swarm may prune historical tasks between listing and inspection. Discard the
+        // partial result and retry only when every diagnostic names a requested task.
+        let missing_tasks = !stderr.is_empty()
+            && stderr.lines().all(|line| {
+                line.strip_prefix("Error response from daemon: task ")
+                    .and_then(|message| message.strip_suffix(" not found"))
+                    .is_some_and(|id| ids.contains(&id))
+            });
+        ensure!(missing_tasks, "docker inspect failed: {stderr}");
+        ensure!(
+            attempt < 2,
+            "docker inspect failed: tasks kept disappearing during 3 inspection attempts: {stderr}"
+        );
     }
-    let mut args = vec!["inspect", "--type", "task"];
-    args.extend(ids);
-    serde_json::from_slice(&docker(&args, None).await?).context("parse task inspection")
+    unreachable!("the final inspection attempt returns a result or error")
 }
 
 pub async fn running(application_id: &str) -> Result<Vec<RunningDeployment>> {
@@ -169,6 +190,17 @@ pub async fn remove(application_id: &str) -> Result<()> {
 }
 
 async fn docker(args: &[&str], input: Option<&[u8]>) -> Result<Vec<u8>> {
+    let output = docker_output(args, input).await?;
+    ensure!(
+        output.status.success(),
+        "docker {} failed: {}",
+        args[0],
+        String::from_utf8_lossy(&output.stderr).trim()
+    );
+    Ok(output.stdout)
+}
+
+async fn docker_output(args: &[&str], input: Option<&[u8]>) -> Result<std::process::Output> {
     let mut child = Command::new("docker")
         .args(args)
         .env("DOCKER_HOST", "unix:///var/run/docker.sock")
@@ -191,17 +223,10 @@ async fn docker(args: &[&str], input: Option<&[u8]>) -> Result<Vec<u8>> {
             .context("write stack specification")?;
         // Dropping stdin sends EOF before waiting for Docker.
     }
-    let output = child
+    child
         .wait_with_output()
         .await
-        .context("wait for Docker CLI")?;
-    ensure!(
-        output.status.success(),
-        "docker {} failed: {}",
-        args[0],
-        String::from_utf8_lossy(&output.stderr).trim()
-    );
-    Ok(output.stdout)
+        .context("wait for Docker CLI")
 }
 
 fn requested_container(container: &Value, deployment: &Deployment) -> bool {
@@ -260,7 +285,7 @@ fn converged(
                 .map(|code| format!(" (exit code {code})"))
                 .unwrap_or_default();
             bail!(
-                "deployment task {state}{exit}: {}",
+                "deployment task {state}{exit}: {}. Check runtime logs for more details.",
                 task.pointer("/Status/Err")
                     .and_then(Value::as_str)
                     .filter(|reason| !reason.is_empty())
