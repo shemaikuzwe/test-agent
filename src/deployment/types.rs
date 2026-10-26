@@ -10,8 +10,8 @@ pub struct Deployment {
     pub deployment_id: Uuid,
     pub application_id: String,
     pub image: String,
-    pub hostname: String,
-    pub port: u16,
+    pub hostname: Option<String>,
+    pub port: Option<u16>,
     pub env: BTreeMap<String, String>,
 }
 
@@ -32,21 +32,23 @@ impl Deployment {
             "deployment ID must not be nil"
         );
         validate_application_id(&self.application_id)?;
-        let hostname = &self.hostname;
-        ensure!(
-            hostname.len() <= 253
-                && hostname.split('.').all(|label| {
-                    !label.is_empty()
-                        && label.len() <= 63
-                        && !label.starts_with('-')
-                        && !label.ends_with('-')
-                        && label
-                            .bytes()
-                            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-                }),
-            "hostname must be a DNS name without a scheme, port, or path"
-        );
-        ensure!(self.port != 0, "port must be between 1 and 65535");
+        if let Some(hostname) = &self.hostname {
+            ensure!(self.port.is_some(), "a hostname requires a configured port");
+            ensure!(
+                hostname.len() <= 253
+                    && hostname.split('.').all(|label| {
+                        !label.is_empty()
+                            && label.len() <= 63
+                            && !label.starts_with('-')
+                            && !label.ends_with('-')
+                            && label
+                                .bytes()
+                                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+                    }),
+                "hostname must be a DNS name without a scheme, port, or path"
+            );
+        }
+        ensure!(self.port != Some(0), "port must be between 1 and 65535");
         let (name, digest) = self
             .image
             .rsplit_once("@sha256:")
@@ -127,7 +129,25 @@ pub fn validate_application_id(id: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::validate_application_id;
+    use super::{Deployment, validate_application_id};
+
+    #[test]
+    fn accepts_workers_and_requires_a_port_for_public_domains() {
+        let mut deployment: Deployment = serde_json::from_value(serde_json::json!({
+            "deploymentId": "00000000-0000-4000-8000-000000000002",
+            "applicationId": "worker",
+            "image": format!("registry/worker@sha256:{}", "a".repeat(64)),
+            "env": {},
+        }))
+        .unwrap();
+        assert!(deployment.validate().is_ok());
+        deployment.hostname = Some("worker.example.com".into());
+        assert!(deployment.validate().is_err());
+        deployment.port = Some(3000);
+        assert!(deployment.validate().is_ok());
+        deployment.port = Some(0);
+        assert!(deployment.validate().is_err());
+    }
 
     #[test]
     fn accepts_hosting_ids_and_existing_uuids() {

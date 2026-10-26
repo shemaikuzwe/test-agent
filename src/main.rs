@@ -45,9 +45,9 @@ enum Command {
         #[arg(long)]
         application_id: String,
         #[arg(long)]
-        hostname: String,
+        hostname: Option<String>,
         #[arg(long)]
-        port: u16,
+        port: Option<u16>,
         #[arg(long, value_name = "KEY=VALUE")]
         env: Vec<String>,
     },

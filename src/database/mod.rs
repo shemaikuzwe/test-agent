@@ -33,10 +33,8 @@ struct JobRecord {
     updated_at: i64,
     created_at: i64,
     application_id: String,
-    #[diesel(select_expression = jobs::hostname.assume_not_null())]
-    hostname: String,
-    #[diesel(select_expression = jobs::port.assume_not_null())]
-    port: i32,
+    hostname: Option<String>,
+    port: Option<i32>,
     env: Option<String>,
 }
 
@@ -61,7 +59,11 @@ impl TryFrom<JobRecord> for Job {
                 application_id: record.application_id,
                 image: record.image,
                 hostname: record.hostname,
-                port: record.port.try_into().context("invalid stored port")?,
+                port: record
+                    .port
+                    .map(u16::try_from)
+                    .transpose()
+                    .context("invalid stored port")?,
                 env: record
                     .env
                     .as_deref()
@@ -131,7 +133,7 @@ impl Store {
                 jobs::image.eq(&deployment.image),
                 jobs::application_id.eq(deployment.application_id.to_string()),
                 jobs::hostname.eq(&deployment.hostname),
-                jobs::port.eq(i32::from(deployment.port)),
+                jobs::port.eq(deployment.port.map(i32::from)),
                 jobs::env.eq(serde_json::to_string(&deployment.env)?),
                 jobs::state.eq(JobState::Pending.as_str()),
                 jobs::updated_at.eq(now),

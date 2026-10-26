@@ -13,7 +13,15 @@ use super::types::{Deployment, RunningDeployment, validate_application_id};
 const DEPLOYMENT_LABEL: &str = "sl-runner.deployment-id";
 const STARTUP_WINDOW_SECONDS: i64 = 10;
 
+
 fn stack_spec(deployment: &Deployment) -> Value {
+    let labels = match (&deployment.hostname, deployment.port) {
+        (Some(hostname), Some(port)) => json!({
+            "caddy": format!("http://{hostname}"),
+            "caddy.reverse_proxy": format!("{{{{upstreams {port}}}}}"),
+        }),
+        _ => json!({}),
+    };
     json!({
         "version": "3.8",
         "services": {
@@ -34,10 +42,7 @@ fn stack_spec(deployment: &Deployment) -> Value {
                 "networks": ["sl-proxy"],
                 "deploy": {
                     "replicas": 1,
-                    "labels": {
-                        "caddy": format!("http://{}", deployment.hostname),
-                        "caddy.reverse_proxy": format!("{{{{upstreams {}}}}}", deployment.port),
-                    },
+                    "labels": labels,
                     "restart_policy": { "condition": "any" },
                     "update_config": {
                         "parallelism": 1,
@@ -252,7 +257,7 @@ fn converged(
     ) = update
     {
         bail!(
-            "service rollout {state}: {}",
+            "Deployment failed during startup (service rollout {state}): {}. Check runtime logs for more details.",
             service
                 .pointer("/UpdateStatus/Message")
                 .and_then(Value::as_str)
