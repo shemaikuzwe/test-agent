@@ -7,7 +7,7 @@ services:
     environment:
       LOKI_PUSH_URL: "${LOKI_PUSH_URL}"
     configs:
-      - source: runtime_alloy
+      - source: runtime_alloy_v2
         target: /etc/alloy/config.alloy
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -18,7 +18,7 @@ services:
         condition: any
 
 configs:
-  runtime_alloy:
+  runtime_alloy_v2:
     file: ./runtime.alloy
 
 volumes:

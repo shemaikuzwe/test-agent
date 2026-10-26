@@ -1,9 +1,16 @@
 discovery.docker "apps" {
-	host = "unix:///var/run/docker.sock"
+	host             = "unix:///var/run/docker.sock"
+	refresh_interval = "2s"
 
 	filter {
 		name   = "label"
 		values = ["sl-runner.application-id", "sl-runner.deployment-id"]
+	}
+
+	// Read retained output even when a container exits before its first discovery.
+	filter {
+		name   = "status"
+		values = ["running", "exited", "dead"]
 	}
 }
 
@@ -39,6 +46,11 @@ discovery.relabel "apps" {
 loki.source.docker "apps" {
 	host       = "unix:///var/run/docker.sock"
 	targets    = discovery.relabel.apps.output
+	forward_to = [loki.process.runtime.receiver]
+}
+
+loki.process "runtime" {
+	stage.decolorize { }
 	forward_to = [loki.write.central.receiver]
 }
 
