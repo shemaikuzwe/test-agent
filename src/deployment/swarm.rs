@@ -2,6 +2,7 @@ use std::process::Stdio;
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail, ensure};
+use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 use tokio::{io::AsyncWriteExt, process::Command, time};
 
@@ -10,6 +11,7 @@ use crate::response::ErrorCode;
 use super::types::{Deployment, RunningDeployment, validate_application_id};
 
 const DEPLOYMENT_LABEL: &str = "sl-runner.deployment-id";
+const STARTUP_WINDOW_SECONDS: i64 = 10;
 
 fn stack_spec(deployment: &Deployment) -> Value {
     json!({
@@ -76,7 +78,7 @@ pub(crate) async fn deploy(deployment: &Deployment) -> Result<()> {
             serde_json::from_slice(&output).context("parse service inspection")?;
         let service = services.first().context("Docker returned no service")?;
         let tasks = inspect_tasks(&service_name).await?;
-        if converged(service, &tasks, deployment)? {
+        if converged(service, &tasks, deployment, Utc::now())? {
             return Ok(());
         }
         // The worker bounds the entire deployment, including Docker commands, to 300 seconds.
@@ -211,7 +213,12 @@ fn requested_container(container: &Value, deployment: &Deployment) -> bool {
             == Some(deployment.deployment_id.to_string().as_str())
 }
 
-fn converged(service: &Value, tasks: &[Value], deployment: &Deployment) -> Result<bool> {
+fn converged(
+    service: &Value,
+    tasks: &[Value],
+    deployment: &Deployment,
+    now: DateTime<Utc>,
+) -> Result<bool> {
     let update = service
         .pointer("/UpdateStatus/State")
         .and_then(Value::as_str);
@@ -241,42 +248,41 @@ fn converged(service: &Value, tasks: &[Value], deployment: &Deployment) -> Resul
                 .is_some_and(|container| requested_container(container, deployment))
         })
         .collect();
-    let running = matching.iter().any(|task| {
-        task["DesiredState"] == "running"
-            && task.pointer("/Status/State").and_then(Value::as_str) == Some("running")
-    });
-    if running {
-        return Ok(update.is_none() || update == Some("completed"));
+    // A replacement must not hide a task that already exited during startup.
+    for task in &matching {
+        if let Some(
+            state @ ("rejected" | "failed" | "complete" | "shutdown" | "orphaned" | "remove"),
+        ) = task.pointer("/Status/State").and_then(Value::as_str)
+        {
+            let exit = task
+                .pointer("/Status/ContainerStatus/ExitCode")
+                .and_then(Value::as_i64)
+                .map(|code| format!(" (exit code {code})"))
+                .unwrap_or_default();
+            bail!(
+                "deployment task {state}{exit}: {}",
+                task.pointer("/Status/Err")
+                    .and_then(Value::as_str)
+                    .filter(|reason| !reason.is_empty())
+                    .unwrap_or("container exited before startup completed")
+            );
+        }
     }
-    let starting = matching.iter().any(|task| {
-        task["DesiredState"] == "running"
-            && matches!(
-                task.pointer("/Status/State").and_then(Value::as_str),
-                Some(
-                    "new"
-                        | "allocated"
-                        | "pending"
-                        | "assigned"
-                        | "accepted"
-                        | "preparing"
-                        | "ready"
-                        | "starting"
-                )
-            )
-    });
-    if !starting {
-        for task in matching {
-            if matches!(
-                task.pointer("/Status/State").and_then(Value::as_str),
-                Some("rejected" | "failed" | "complete")
-            ) {
-                bail!(
-                    "deployment task stopped: {}",
-                    task.pointer("/Status/Err")
-                        .and_then(Value::as_str)
-                        .unwrap_or("container exited before convergence")
-                );
-            }
+    for task in matching {
+        if task["DesiredState"] != "running"
+            || task.pointer("/Status/State").and_then(Value::as_str) != Some("running")
+        {
+            continue;
+        }
+        // This timestamp belongs to this task's transition to running, not its creation.
+        let timestamp = task
+            .pointer("/Status/Timestamp")
+            .and_then(Value::as_str)
+            .context("running task has no state timestamp")?;
+        let running_since = DateTime::parse_from_rfc3339(timestamp)
+            .context("running task has an invalid state timestamp")?;
+        if now.signed_duration_since(running_since).num_seconds() >= STARTUP_WINDOW_SECONDS {
+            return Ok(update.is_none() || update == Some("completed"));
         }
     }
     Ok(false)
