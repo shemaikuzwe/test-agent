@@ -2,6 +2,10 @@ use std::{collections::BTreeMap, path::Path, process::ExitCode};
 
 use anyhow::{Context, Result, ensure};
 use clap::{Parser, Subcommand, ValueEnum};
+use serde::{
+    Deserializer,
+    de::{MapAccess, Visitor},
+};
 use sl_runner::{
     database::Store,
     deployment,
@@ -48,8 +52,9 @@ enum Command {
         hostname: Option<String>,
         #[arg(long)]
         port: Option<u16>,
-        #[arg(long, value_name = "KEY=VALUE")]
-        env: Vec<String>,
+        /// Read a JSON object of environment string values from stdin.
+        #[arg(long)]
+        env_stdin: bool,
     },
     Rollback {
         deployment_id: Uuid,
@@ -132,7 +137,7 @@ async fn main() -> ExitCode {
                 .nth(1)
                 .and_then(|arg| arg.into_string().ok())
                 .and_then(|arg| CommandName::from_str(&arg, false).ok());
-            // Clap's diagnostic can echo supplied values, including --env secrets.
+            // Clap's diagnostic can echo supplied argument values.
             let response = Response::failure(
                 command,
                 ErrorData::default(),
@@ -238,7 +243,7 @@ async fn run(cli: Cli, state_dir: &Path) -> Result<CommandData> {
             application_id,
             hostname,
             port,
-            env,
+            env_stdin,
         } => {
             let deployment = Deployment {
                 deployment_id,
@@ -246,7 +251,11 @@ async fn run(cli: Cli, state_dir: &Path) -> Result<CommandData> {
                 application_id,
                 hostname,
                 port,
-                env: parse_env(env).context(ErrorCode::InvalidArgument)?,
+                env: if env_stdin {
+                    parse_env(std::io::stdin().lock()).context(ErrorCode::InvalidArgument)?
+                } else {
+                    BTreeMap::new()
+                },
             };
             deployment.validate().context(ErrorCode::InvalidArgument)?;
             let mut conn = Store::open(state_dir)
@@ -344,17 +353,107 @@ async fn run(cli: Cli, state_dir: &Path) -> Result<CommandData> {
     }
 }
 
-fn parse_env(entries: Vec<String>) -> Result<BTreeMap<String, String>> {
-    let mut env = BTreeMap::new();
-    for entry in entries {
-        let (name, value) = entry
-            .split_once('=')
-            .ok_or_else(|| anyhow::anyhow!("environment variable must use KEY=VALUE"))?;
-        ensure!(
-            !env.contains_key(name),
-            "duplicate environment variable name"
-        );
-        env.insert(name.to_owned(), value.to_owned());
+fn parse_env(reader: impl std::io::Read) -> Result<BTreeMap<String, String>> {
+    struct EnvironmentVisitor;
+
+    impl<'de> Visitor<'de> for EnvironmentVisitor {
+        type Value = BTreeMap<String, String>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a JSON object with unique keys and string values")
+        }
+
+        fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+            let mut env = BTreeMap::new();
+            while let Some((name, value)) = map.next_entry::<String, String>()? {
+                if env.insert(name, value).is_some() {
+                    return Err(serde::de::Error::custom(
+                        "duplicate environment variable name",
+                    ));
+                }
+            }
+            Ok(env)
+        }
     }
+
+    let mut deserializer = serde_json::Deserializer::from_reader(reader);
+    // JSON errors can include input values, so never expose the original error.
+    let invalid = || {
+        anyhow::anyhow!(
+            "environment stdin must be a JSON object with unique keys and string values"
+        )
+    };
+    let env = deserializer
+        .deserialize_map(EnvironmentVisitor)
+        .map_err(|_| invalid())?;
+    deserializer.end().map_err(|_| invalid())?;
     Ok(env)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn environment_preserves_string_values() {
+        let expected = BTreeMap::from([
+            ("EMPTY".to_owned(), String::new()),
+            ("TOKEN".to_owned(), "line one\n\"$value=é\"".to_owned()),
+        ]);
+        let json = serde_json::to_vec(&expected).unwrap();
+        assert_eq!(parse_env(json.as_slice()).unwrap(), expected);
+        assert!(parse_env(b"{}".as_slice()).unwrap().is_empty());
+    }
+
+    #[test]
+    fn environment_rejects_invalid_input_without_echoing_secrets() {
+        for input in [
+            r#"{"SECRET":"hidden","SECRET":"other"}"#,
+            r#"{"SECRET":123}"#,
+            r#"{"SECRET":null}"#,
+            r#"{"SECRET":true}"#,
+            r#"{"SECRET":{"hidden":"value"}}"#,
+            r#"{"SECRET":"hidden""#,
+            r#"{"SECRET":"hidden"} trailing"#,
+            r#"["hidden"]"#,
+            "",
+        ] {
+            let error = parse_env(input.as_bytes()).unwrap_err().to_string();
+            assert_eq!(
+                error,
+                "environment stdin must be a JSON object with unique keys and string values"
+            );
+        }
+    }
+
+    #[test]
+    fn submit_environment_is_opt_in_and_rejects_old_arguments() {
+        let args = [
+            "sl-runner",
+            "submit",
+            "--deployment-id",
+            "00000000-0000-4000-8000-000000000001",
+            "--application-id",
+            "app",
+            "--image",
+            "registry/app:latest",
+        ];
+        assert!(matches!(
+            Cli::try_parse_from(args).unwrap().command,
+            Command::Submit {
+                env_stdin: false,
+                ..
+            }
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(args.into_iter().chain(["--env-stdin"]))
+                .unwrap()
+                .command,
+            Command::Submit {
+                env_stdin: true,
+                ..
+            }
+        ));
+        assert!(Cli::try_parse_from(args.into_iter().chain(["--env", "SECRET=hidden"])).is_err());
+    }
 }

@@ -161,11 +161,18 @@ sudo -u sl-runner docker --config /etc/sl-runner/docker login 10.43.251.159
 
 ## Application environment variables
 
-Add repeated `--env KEY=VALUE` arguments to `submit`:
+Pass a JSON object of string values through stdin using `--env-stdin`:
 
 ```sh
-sl-runner submit ... --env NODE_ENV=production --env 'TOKEN=value=with$dollars' --env EMPTY=
+sl-runner submit ... --env-stdin < environment.json
 ```
+
+For example, `environment.json` can contain:
+
+```json
+{"NODE_ENV":"production","TOKEN":"value=with$dollars","EMPTY":""}
+```
+
 
 ## Rollback
 

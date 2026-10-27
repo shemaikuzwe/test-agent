@@ -12,9 +12,23 @@ runner=()
 if [[ $EUID -eq 0 ]]; then
   runner=(runuser -u sl-runner --)
 fi
-"${runner[@]}" /opt/sl-runner/sl-runner submit \
+submit=("${runner[@]}" /opt/sl-runner/sl-runner submit \
   --deployment-id "$deployment_id" \
   --application-id "$application_id" \
   --image "$image" \
   --hostname sl.local \
-  --port 3000
+  --port 3000 --env-stdin)
+
+# Invalid input must fail without exposing the supplied value in either stream.
+if output=$(printf '%s' '{"TOKEN":"secret-must-not-appear"' | "${submit[@]}" 2>&1); then
+  printf 'Invalid environment input was accepted\n' >&2
+  exit 1
+fi
+if [[ "$output" != *'"code":"INVALID_ARGUMENT"'* || "$output" == *secret-must-not-appear* ]]; then
+  printf 'Invalid environment response was not safe\n' >&2
+  exit 1
+fi
+
+"${submit[@]}" <<'JSON'
+{"NODE_ENV":"production","EMPTY":"","GREETING":"hello\n\"$value=é\""}
+JSON
