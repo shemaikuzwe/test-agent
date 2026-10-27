@@ -5,6 +5,17 @@ set -euo pipefail
 purge=${1:-}
 [[ -z $purge || $purge == --purge ]] || { echo "Unknown argument: $purge" >&2; exit 1; }
 
+# Older installations may not have Docker cleanup units.
+for unit in sl-runner-cleanup.timer sl-runner-cleanup.service; do
+  if systemctl cat "$unit" >/dev/null 2>&1; then
+    systemctl stop "$unit"
+    if [[ $unit == *.timer ]]; then
+      systemctl disable "$unit"
+    fi
+  fi
+done
+rm -f -- /etc/systemd/system/sl-runner-cleanup.timer /etc/systemd/system/sl-runner-cleanup.service
+
 printf 'Stopping and disabling the runner service...\n'
 systemctl stop sl-runner.service
 systemctl disable sl-runner.service

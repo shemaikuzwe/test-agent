@@ -252,3 +252,22 @@ Errors add an `error` object with a stable `code` and informational `message`:
 | `DATABASE_ERROR` | State directory, SQLite, or migration operation failed |
 | `DOCKER_ERROR` | Docker execution or inspection failed |
 | `INTERNAL_ERROR` | Unexpected runner failure |
+
+## Docker storage cleanup
+
+Installation and upgrades enable `sl-runner-cleanup.timer` in each VM. It runs
+at 03:00 in the VM timezone and catches up after boot if a scheduled run was
+missed. The oneshot service first prunes stopped containers, then unused images,
+with a seven-day (`168h`) creation-age threshold. This is not time since last use.
+Running containers and their images, volumes, and networks are preserved.
+Removed rollback images must be pulled from Harbor again.
+
+Inspect the schedule, cleanup output, and Docker disk usage:
+
+```sh
+systemctl list-timers sl-runner-cleanup.timer
+journalctl -u sl-runner-cleanup.service
+docker system df -v
+```
+
+Uninstalling the runner stops cleanup and removes both units.

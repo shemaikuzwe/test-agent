@@ -52,7 +52,7 @@ curl -fsSL "$download_url/SHA256SUMS" -o "$staging/SHA256SUMS"
     echo 'Expected exactly one archive checksum.' >&2; exit 1;
   }
   sha256sum --check archive.sha256
-  tar -xzf "$archive" sl-runner/sl-runner
+  tar -xzf "$archive" sl-runner/sl-runner sl-runner/sl-runner-cleanup.service sl-runner/sl-runner-cleanup.timer
 )
 binary=$staging/sl-runner/sl-runner
 [[ $("$binary" --version) == "sl-runner ${version#v}" ]] || {
@@ -68,6 +68,10 @@ printf 'Applying pending database migrations...\n'
 runuser -u sl-runner -- "$replacement" migrate
 mv -f -- "$replacement" "$installed"
 replacement=''
+install -m 0644 "$staging/sl-runner/sl-runner-cleanup.service" "$staging/sl-runner/sl-runner-cleanup.timer" /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now sl-runner-cleanup.timer
+systemctl is-active --quiet sl-runner-cleanup.timer
 systemctl start sl-runner.service
 systemctl is-active --quiet sl-runner.service
 stopped=false

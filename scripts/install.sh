@@ -65,7 +65,7 @@ trap 'rm -rf -- "$staging"' EXIT
 binary=$install_dir/sl-runner
 [[ -f $binary ]] || binary=$install_dir/target/release/sl-runner
 [[ -f $binary ]] || binary=/opt/sl-runner/sl-runner
-if [[ -n $version || -z $install_dir || ! -f $binary || ! -f $install_dir/sl-runner.service || ! -f $install_dir/caddy-stack.yaml ]]; then
+if [[ -n $version || -z $install_dir || ! -f $binary || ! -f $install_dir/sl-runner.service || ! -f $install_dir/sl-runner-cleanup.service || ! -f $install_dir/sl-runner-cleanup.timer || ! -f $install_dir/caddy-stack.yaml ]]; then
   repository='shemaikuzwe/test-agent'
   version=${version:-latest}
   case "$(uname -m)" in
@@ -102,7 +102,7 @@ if [[ -n $version || -z $install_dir || ! -f $binary || ! -f $install_dir/sl-run
   script_dir=$install_dir/scripts
   binary=$install_dir/sl-runner
 fi
-for file in "$binary" "$script_dir/../sl-runner.service" "$install_dir/caddy-stack.yaml"; do
+for file in "$binary" "$script_dir/../sl-runner.service" "$install_dir/sl-runner-cleanup.service" "$install_dir/sl-runner-cleanup.timer" "$install_dir/caddy-stack.yaml"; do
   [[ -f $file && -r $file ]] || { echo "Cannot read $file" >&2; exit 1; }
 done
 if [[ -n $loki_url ]]; then
@@ -120,7 +120,7 @@ step=3
 printf '%s[3/9] Preparing runner files...%s\n' "$blue" "$reset"
 # Stage inputs before replacing installed files, including when upgrading in place.
 install -m 0755 "$binary" "$staging/sl-runner"
-install -m 0644 "$script_dir/../sl-runner.service" "$staging/sl-runner.service"
+install -m 0644 "$script_dir/../sl-runner.service" "$install_dir/sl-runner-cleanup.service" "$install_dir/sl-runner-cleanup.timer" "$staging/"
 advertise_addr=$(ip -4 route get 1.1.1.1 | awk '{for (i=1; i<NF; i++) if ($i == "src") {print $(i+1); exit}}')
 [[ -n $advertise_addr ]] || { echo 'Cannot determine VM IPv4 address.' >&2; exit 1; }
 printf '%s  Detected VM address: %s%s\n' "$green" "$advertise_addr" "$reset"
@@ -200,12 +200,14 @@ install -d -o sl-runner -g sl-runner -m 0700 /etc/sl-runner/docker /var/lib/sl-r
 install -m 0755 "$staging/sl-runner" /opt/sl-runner/sl-runner
 install -d -m 0755 /usr/local/bin
 ln -sfn /opt/sl-runner/sl-runner /usr/local/bin/sl-runner
-install -m 0644 "$staging/sl-runner.service" /etc/systemd/system/sl-runner.service
+install -m 0644 "$staging/sl-runner.service" "$staging/sl-runner-cleanup.service" "$staging/sl-runner-cleanup.timer" /etc/systemd/system/
 runuser -u sl-runner -- /opt/sl-runner/sl-runner migrate
 step=9
 printf '%s[9/9] Starting and checking the runner service...%s\n' "$blue" "$reset"
 systemctl daemon-reload
 systemctl enable --now sl-runner.service
+systemctl enable --now sl-runner-cleanup.timer
+systemctl is-active --quiet sl-runner-cleanup.timer
 systemctl is-active --quiet sl-runner.service
 printf '\n%sRunner installed; service is active.%s\n' "$green" "$reset"
 printf '%sLog in to Harbor before deploying private images:%s\n' "$yellow" "$reset"
